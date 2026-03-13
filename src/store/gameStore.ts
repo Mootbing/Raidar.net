@@ -30,6 +30,12 @@ interface Aircraft {
   spi?: boolean;
   positionSource?: number;
   lastContact?: number;
+  // Enriched metadata (from OpenSky metadata API)
+  aircraftModel?: string;
+  typecode?: string;
+  operator?: string;
+  registration?: string;
+  isMilitary?: boolean;
 }
 
 interface TrackWaypoint {

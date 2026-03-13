@@ -200,8 +200,35 @@ function AircraftInfoContent({
           </>
         )}
         {aircraft.spi && <span className={`${TEXT.ERROR} animate-pulse`}>SPI</span>}
+        {aircraft.isMilitary && (
+          <>
+            <span className={TEXT.DARK}>|</span>
+            <span className={`${TEXT.ERROR} font-medium`}>MIL</span>
+          </>
+        )}
       </div>
-      
+
+      {/* Aircraft Identification (from metadata enrichment) */}
+      {(aircraft.type !== 'UNKNOWN' || aircraft.operator || aircraft.registration) && (
+        <div className={`${BORDER.DIVIDER} pt-2`}>
+          <div className={`${TEXT.DIMMED} ${TEXT.SM} tracking-wider mb-1`}>IDENTIFICATION</div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+            {aircraft.type !== 'UNKNOWN' && (
+              <DataRow label="TYPE" value={aircraft.type} glowColor={glowColor} />
+            )}
+            {aircraft.aircraftModel && (
+              <DataRow label="MODEL" value={aircraft.aircraftModel} glowColor={glowColor} />
+            )}
+            {aircraft.operator && (
+              <DataRow label="OPR" value={aircraft.operator} glowColor={glowColor} />
+            )}
+            {aircraft.registration && (
+              <DataRow label="REG" value={aircraft.registration} glowColor={glowColor} />
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Position Section - Hover to show last synced for all */}
       <div className={`${BORDER.DIVIDER} pt-2`}>
         <div 
@@ -333,6 +360,188 @@ function AirportInfoContent({
         <DataRow label="COUNTRY" value={airport.country || 'N/A'} glowColor={glowColor} />
         <DataRow label="ELEV" value={airport.elevation ? `${Math.round(airport.elevation)} ft` : 'N/A'} glowColor={glowColor} />
         <DataRow label="TYPE" value={airport.type.replace('_', ' ').toUpperCase()} glowColor={glowColor} />
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// SHIP INFO CONTENT
+// ============================================================================
+
+const SHIP_TYPE_LABELS: Record<string, string> = {
+  cargo: 'CARGO',
+  tanker: 'TANKER',
+  passenger: 'PASSENGER',
+  military: 'MILITARY',
+  fishing: 'FISHING',
+  high_speed: 'HIGH SPEED',
+  special: 'SPECIAL',
+  other: 'OTHER',
+};
+
+function ShipInfoContent({
+  ship,
+  glowColor,
+}: {
+  ship: any;
+  glowColor: 'green' | 'yellow';
+}) {
+  return (
+    <div className="space-y-2 select-none">
+      {/* Header - Name & MMSI */}
+      <div className={`flex items-start justify-between gap-3 ${BORDER.DIVIDER_B} pb-2`}>
+        <div className="flex-1 min-w-0">
+          <div className={`${TEXT.PRIMARY} font-medium text-sm truncate`}>
+            <ScrollingText text={ship.name || 'Unknown Vessel'} glowColor={glowColor} />
+          </div>
+          <div className={`${TEXT.SECONDARY} ${TEXT.SM} truncate`}>
+            {SHIP_TYPE_LABELS[ship.shipType] || ship.shipType?.toUpperCase() || 'UNKNOWN'}
+          </div>
+        </div>
+        <div className="text-right shrink-0">
+          <div className={`${TEXT.ACCENT} ${TEXT.MONO}`}>
+            <ScrollingText text={ship.id} glowColor="green" />
+          </div>
+          <div className={`${TEXT.DIMMED} ${TEXT.SM}`}>MMSI</div>
+        </div>
+      </div>
+
+      {/* Status */}
+      <div className="flex items-center gap-2">
+        <div className={ship.speed > 0.5 ? COMPONENT.DOT_ACTIVE : COMPONENT.DOT_INACTIVE} />
+        <ScrollingText
+          text={ship.speed > 0.5 ? 'UNDERWAY' : 'AT_ANCHOR'}
+          className={TEXT.SECONDARY}
+          glowColor={glowColor}
+        />
+        {ship.flag && (
+          <>
+            <span className={TEXT.DARK}>|</span>
+            <span className={TEXT.SECONDARY}>FLAG: <ScrollingText text={ship.flag} className={TEXT.WARNING} glowColor={glowColor} /></span>
+          </>
+        )}
+      </div>
+
+      {/* Navigation */}
+      <div className={`${BORDER.DIVIDER} pt-2`}>
+        <div className={`${TEXT.DIMMED} ${TEXT.SM} tracking-wider mb-1`}>NAVIGATION</div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+          <DataRow label="SPEED" value={`${ship.speed ?? 0} kn`} glowColor={glowColor} />
+          <DataRow label="HEADING" value={`${Math.round(ship.heading ?? 0)}°`} glowColor={glowColor} />
+          <DataRow label="LAT" value={formatCoord(ship.lat, true)} glowColor={glowColor} />
+          <DataRow label="LON" value={formatCoord(ship.lon, false)} glowColor={glowColor} />
+        </div>
+      </div>
+
+      {/* Voyage Info */}
+      <div className={`${BORDER.DIVIDER} pt-2`}>
+        <div className={`${TEXT.DIMMED} ${TEXT.SM} tracking-wider mb-1`}>VOYAGE</div>
+        <div className="space-y-0.5">
+          <DataRow label="DEST" value={ship.destination || 'N/A'} glowColor={glowColor} />
+          {ship.draught != null && (
+            <DataRow label="DRAUGHT" value={`${ship.draught} m`} glowColor={glowColor} />
+          )}
+          {ship.imo != null && (
+            <DataRow label="IMO" value={String(ship.imo)} glowColor={glowColor} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// SATELLITE INFO CONTENT
+// ============================================================================
+
+function SatelliteInfoContent({
+  sat,
+  glowColor,
+}: {
+  sat: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  glowColor: 'green' | 'yellow';
+}) {
+  return (
+    <div className="space-y-2 select-none">
+      {/* Header - Name & NORAD ID */}
+      <div className={`flex items-start justify-between gap-3 ${BORDER.DIVIDER_B} pb-2`}>
+        <div className="flex-1 min-w-0">
+          <div className={`${TEXT.PRIMARY} font-medium text-sm truncate`}>
+            <ScrollingText text={sat.name || 'UNKNOWN'} glowColor={glowColor} />
+          </div>
+          <div className={`${TEXT.SECONDARY} ${TEXT.SM} truncate`}>
+            {sat.group ? sat.group.toUpperCase() : 'SATELLITE'}
+          </div>
+        </div>
+        <div className="text-right shrink-0">
+          <div className={`${TEXT.ACCENT} ${TEXT.MONO}`}>
+            <ScrollingText text={sat.noradId || 'N/A'} glowColor="green" />
+          </div>
+          <div className={`${TEXT.DIMMED} ${TEXT.SM}`}>NORAD</div>
+        </div>
+      </div>
+
+      {/* Orbit Classification */}
+      <div className="flex items-center gap-2">
+        <div className={COMPONENT.DOT_ACTIVE} />
+        <ScrollingText
+          text={sat.orbitType || 'UNKNOWN'}
+          className={TEXT.SECONDARY}
+          glowColor={glowColor}
+        />
+        {sat.intlDesignator && (
+          <>
+            <span className={TEXT.DARK}>|</span>
+            <span className={TEXT.SECONDARY}>
+              COSPAR: <ScrollingText text={sat.intlDesignator} className={TEXT.WARNING} glowColor={glowColor} />
+            </span>
+          </>
+        )}
+      </div>
+
+      {/* Position */}
+      <div className={`${BORDER.DIVIDER} pt-2`}>
+        <div className={`${TEXT.DIMMED} ${TEXT.SM} tracking-wider mb-1`}>POSITION</div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+          <DataRow
+            label="LAT"
+            value={sat.lat != null ? `${Math.abs(sat.lat).toFixed(4)}${sat.lat >= 0 ? '° N' : '° S'}` : 'N/A'}
+            glowColor={glowColor}
+          />
+          <DataRow
+            label="LON"
+            value={sat.lon != null ? `${Math.abs(sat.lon).toFixed(4)}${sat.lon >= 0 ? '° E' : '° W'}` : 'N/A'}
+            glowColor={glowColor}
+          />
+          <DataRow
+            label="ALT"
+            value={sat.alt != null ? `${Math.round(sat.alt).toLocaleString()} km` : 'N/A'}
+            glowColor={glowColor}
+          />
+          <DataRow
+            label="SPEED"
+            value={sat.velocity != null ? `${sat.velocity.toFixed(2)} km/s` : 'N/A'}
+            glowColor={glowColor}
+          />
+        </div>
+      </div>
+
+      {/* Orbital Parameters */}
+      <div className={`${BORDER.DIVIDER} pt-2`}>
+        <div className={`${TEXT.DIMMED} ${TEXT.SM} tracking-wider mb-1`}>ORBITAL ELEMENTS</div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+          <DataRow
+            label="INCL"
+            value={sat.inclination != null ? `${sat.inclination.toFixed(2)}°` : 'N/A'}
+            glowColor={glowColor}
+          />
+          <DataRow
+            label="PERIOD"
+            value={sat.period != null ? `${sat.period.toFixed(1)} min` : 'N/A'}
+            glowColor={glowColor}
+          />
+        </div>
       </div>
     </div>
   );
@@ -474,7 +683,13 @@ export function EntityInfoPanel({ onClose: _onClose }: EntityInfoPanelProps) {
               {displayedRef?.type === 'airport' && displayedEntity && (
                 <AirportInfoContent airport={displayedEntity as Airport} glowColor={glowColor} />
               )}
-              {displayedRef && !['aircraft', 'airport'].includes(displayedRef.type) && (
+              {displayedRef?.type === 'ship' && displayedEntity && (
+                <ShipInfoContent ship={displayedEntity} glowColor={glowColor} />
+              )}
+              {displayedRef?.type === 'satellite' && displayedEntity && (
+                <SatelliteInfoContent sat={displayedEntity} glowColor={glowColor} />
+              )}
+              {displayedRef && !['aircraft', 'airport', 'ship', 'satellite'].includes(displayedRef.type) && (
                 <div className={TEXT.SECONDARY}>
                   <ScrollingText text={`${typeLabel} info not yet implemented`} glowColor={glowColor} />
                 </div>

@@ -1,127 +1,99 @@
 import { NextResponse } from 'next/server';
-import * as fs from 'fs';
-import * as path from 'path';
+import { getDb } from '@/db/client';
+import { aircraftPositions, aircraftMetadata } from '@/db/schema';
+import { sql } from 'drizzle-orm';
 
-// Rate limiting state
-let lastRequestTime = 0;
-let requestCount = 0;
-let requestCountResetTime = Date.now();
-const MIN_REQUEST_INTERVAL = 5000; // 5 seconds between requests
-const MAX_REQUESTS_PER_MINUTE = 10; // Conservative limit
-
-interface Credentials {
-  clientId: string;
-  clientSecret: string;
-}
-
-function getCredentials(): Credentials | null {
-  try {
-    const credPath = path.join(process.cwd(), 'credentials.json');
-    if (fs.existsSync(credPath)) {
-      const data = fs.readFileSync(credPath, 'utf-8');
-      return JSON.parse(data);
-    }
-  } catch (e) {
-    console.error('[API] Failed to read credentials:', e);
-  }
-  return null;
-}
+/**
+ * Aircraft Data API
+ *
+ * Reads aircraft positions from Neon Postgres (populated by the fetcher process).
+ * Supports viewport-bounded queries via query params: lamin, lamax, lomin, lomax.
+ * JOINs aircraft_metadata for type/model/operator enrichment.
+ */
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const lamin = searchParams.get('lamin');
-  const lamax = searchParams.get('lamax');
-  const lomin = searchParams.get('lomin');
-  const lomax = searchParams.get('lomax');
-
-  // Rate limiting checks
-  const now = Date.now();
-  
-  // Reset counter every minute
-  if (now - requestCountResetTime > 60000) {
-    requestCount = 0;
-    requestCountResetTime = now;
-  }
-  
-  // Check if we've exceeded requests per minute
-  if (requestCount >= MAX_REQUESTS_PER_MINUTE) {
-    const waitTime = Math.ceil((60000 - (now - requestCountResetTime)) / 1000);
-    return NextResponse.json(
-      { error: 'Rate limited', message: `Too many requests. Try again in ${waitTime}s`, retryAfter: waitTime },
-      { status: 429 }
-    );
-  }
-  
-  // Check minimum interval between requests
-  const timeSinceLastRequest = now - lastRequestTime;
-  if (timeSinceLastRequest < MIN_REQUEST_INTERVAL) {
-    const waitTime = Math.ceil((MIN_REQUEST_INTERVAL - timeSinceLastRequest) / 1000);
-    return NextResponse.json(
-      { error: 'Rate limited', message: `Please wait ${waitTime}s between requests`, retryAfter: waitTime },
-      { status: 429 }
-    );
-  }
-
-  // Build OpenSky URL
-  let url = 'https://opensky-network.org/api/states/all';
-  if (lamin && lamax && lomin && lomax) {
-    url += `?lamin=${lamin}&lamax=${lamax}&lomin=${lomin}&lomax=${lomax}`;
-  }
-
-  // Get credentials for authentication
-  const credentials = getCredentials();
-  const headers: HeadersInit = {
-    'Accept': 'application/json',
-  };
-  
-  if (credentials) {
-    // Use Basic Auth with OpenSky credentials
-    const auth = Buffer.from(`${credentials.clientId}:${credentials.clientSecret}`).toString('base64');
-    headers['Authorization'] = `Basic ${auth}`;
-    console.log('[API] Using authenticated request');
-  } else {
-    console.log('[API] No credentials found, using anonymous request');
-  }
+  const lamin = parseFloat(searchParams.get('lamin') || '-90');
+  const lamax = parseFloat(searchParams.get('lamax') || '90');
+  const lomin = parseFloat(searchParams.get('lomin') || '-180');
+  const lomax = parseFloat(searchParams.get('lomax') || '180');
 
   try {
-    lastRequestTime = now;
-    requestCount++;
-    
-    console.log(`[API] Fetching aircraft (request ${requestCount}/${MAX_REQUESTS_PER_MINUTE} this minute)`);
-    
-    const response = await fetch(url, { 
-      headers,
-      next: { revalidate: 10 } // Cache for 10 seconds
+    const db = getDb();
+
+    // Viewport query with metadata JOIN
+    const rows = await db
+      .select({
+        icao24: aircraftPositions.icao24,
+        callsign: aircraftPositions.callsign,
+        longitude: aircraftPositions.longitude,
+        latitude: aircraftPositions.latitude,
+        altitudeFt: aircraftPositions.altitudeFt,
+        geoAltitudeFt: aircraftPositions.geoAltitudeFt,
+        heading: aircraftPositions.heading,
+        speedKnots: aircraftPositions.speedKnots,
+        verticalRateFpm: aircraftPositions.verticalRateFpm,
+        onGround: aircraftPositions.onGround,
+        squawk: aircraftPositions.squawk,
+        spi: aircraftPositions.spi,
+        positionSource: aircraftPositions.positionSource,
+        originCountry: aircraftPositions.originCountry,
+        isMilitary: aircraftPositions.isMilitary,
+        lastContact: aircraftPositions.lastContact,
+        // Metadata fields
+        typecode: aircraftMetadata.typecode,
+        model: aircraftMetadata.model,
+        operator: aircraftMetadata.operator,
+        registration: aircraftMetadata.registration,
+      })
+      .from(aircraftPositions)
+      .leftJoin(aircraftMetadata, sql`${aircraftPositions.icao24} = ${aircraftMetadata.icao24}`)
+      .where(sql`
+        ${aircraftPositions.latitude} >= ${lamin}
+        AND ${aircraftPositions.latitude} <= ${lamax}
+        AND ${aircraftPositions.longitude} >= ${lomin}
+        AND ${aircraftPositions.longitude} <= ${lomax}
+      `);
+
+    // Map to clean response format
+    const aircraft = rows.map(r => ({
+      id: r.icao24,
+      callsign: r.callsign || 'N/A',
+      type: r.typecode || 'UNKNOWN',
+      position: {
+        longitude: r.longitude,
+        latitude: r.latitude,
+        altitude: r.altitudeFt || 0,
+        heading: r.heading || 0,
+        speed: r.speedKnots || 0,
+        verticalRate: r.verticalRateFpm || 0,
+        geoAltitude: r.geoAltitudeFt || 0,
+      },
+      timestamp: Date.now(),
+      originCountry: r.originCountry || 'Unknown',
+      onGround: r.onGround || false,
+      squawk: r.squawk || null,
+      spi: r.spi || false,
+      positionSource: r.positionSource || 0,
+      lastContact: r.lastContact || null,
+      isMilitary: r.isMilitary || false,
+      // Enriched metadata
+      typecode: r.typecode || null,
+      aircraftModel: r.model || null,
+      operator: r.operator || null,
+      registration: r.registration || null,
+    }));
+
+    return NextResponse.json({
+      aircraft,
+      source: 'neon',
+      count: aircraft.length,
     });
-
-    if (!response.ok) {
-      if (response.status === 429) {
-        return NextResponse.json(
-          { error: 'OpenSky rate limited', message: 'OpenSky API rate limit exceeded' },
-          { status: 429 }
-        );
-      }
-      if (response.status === 401) {
-        console.warn('[API] Authentication failed - check credentials.json or create an OpenSky account');
-        return NextResponse.json(
-          { error: 'Authentication required', message: 'Please add OpenSky credentials to credentials.json' },
-          { status: 401 }
-        );
-      }
-      throw new Error(`OpenSky API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    
-    console.log(`[API] Received ${data.states?.length || 0} aircraft`);
-    
-    return NextResponse.json(data);
   } catch (error) {
-    console.error('[API] Error fetching aircraft:', error);
+    console.error('[Aircraft] DB query error:', error);
     return NextResponse.json(
       { error: 'Failed to fetch aircraft data' },
       { status: 500 }
     );
   }
 }
-

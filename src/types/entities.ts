@@ -127,7 +127,7 @@ export interface SamSiteEntity extends MapEntity {
 }
 
 /**
- * Ship entity (placeholder for future)
+ * Ship entity — AIS vessel data
  */
 export interface ShipEntity extends MapEntity {
   entityType: 'ship';
@@ -136,6 +136,9 @@ export interface ShipEntity extends MapEntity {
   heading: number;
   speed: number;
   flag: string;
+  imo?: number;
+  destination?: string;
+  draught?: number;
 }
 
 /**

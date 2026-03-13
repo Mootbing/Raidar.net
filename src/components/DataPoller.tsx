@@ -10,6 +10,10 @@ import { POLLING } from '@/config/constants';
 
 function generateMockData(bounds: ViewportBounds | null, count: number = 50) {
   const countries = ['United States', 'China', 'Germany', 'United Kingdom', 'France', 'Japan', 'Australia', 'Canada', 'Brazil', 'India'];
+  const civilCallsigns = ['UAL', 'DAL', 'AAL', 'SWA', 'JBU', 'ASA', 'BAW', 'AFR', 'DLH', 'CCA'];
+  const milCallsigns = ['RCH', 'DUKE', 'EVAC', 'NAVY', 'SPAR'];
+  const milTypes = ['C17', 'C130', 'KC135', 'F16', 'F35'];
+  const civilTypes = ['B737', 'A320', 'B777', 'A350', 'B380', 'E190'];
   const aircraft = [];
 
   const latMin = bounds?.minLat ?? -70;
@@ -18,11 +22,17 @@ function generateMockData(bounds: ViewportBounds | null, count: number = 50) {
   const lonMax = bounds?.maxLon ?? 180;
 
   for (let i = 0; i < count; i++) {
+    const isMil = Math.random() < 0.1;
     const verticalRate = (Math.random() - 0.5) * 2000;
+    const callsign = isMil
+      ? `${milCallsigns[Math.floor(Math.random() * milCallsigns.length)]}${Math.floor(Math.random() * 999)}`
+      : `${civilCallsigns[Math.floor(Math.random() * civilCallsigns.length)]}${Math.floor(Math.random() * 9999)}`;
+    const id = `mock_${i}_${Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0')}`;
+
     aircraft.push({
-      id: `mock_${i}_${Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0')}`,
-      callsign: `${['UAL', 'DAL', 'AAL', 'SWA', 'JBU', 'ASA', 'BAW', 'AFR', 'DLH', 'CCA'][Math.floor(Math.random() * 10)]}${Math.floor(Math.random() * 9999)}`,
-      type: ['B737', 'A320', 'B777', 'A350', 'B380', 'E190'][Math.floor(Math.random() * 6)],
+      id,
+      callsign,
+      type: isMil ? milTypes[Math.floor(Math.random() * milTypes.length)] : civilTypes[Math.floor(Math.random() * civilTypes.length)],
       position: {
         latitude: latMin + Math.random() * (latMax - latMin),
         longitude: lonMin + Math.random() * (lonMax - lonMin),
@@ -38,6 +48,7 @@ function generateMockData(bounds: ViewportBounds | null, count: number = 50) {
       squawk: Math.floor(Math.random() * 7777).toString().padStart(4, '0'),
       positionSource: 0,
       lastContact: Date.now() / 1000,
+      isMilitary: isMil,
     });
   }
   return aircraft;
@@ -63,6 +74,7 @@ function createSupersonicDebugAircraft() {
     squawk: '7777',
     positionSource: 0,
     lastContact: Date.now() / 1000,
+    isMilitary: true,
   };
 }
 
@@ -74,33 +86,6 @@ function normalizeLon(lon: number): number {
   while (lon > 180) lon -= 360;
   while (lon < -180) lon += 360;
   return lon;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function parseStateVector(s: any[]): Aircraft | null {
-  if (s[5] == null || s[6] == null) return null;
-
-  return {
-    id: s[0],
-    callsign: (s[1] || '').trim() || 'N/A',
-    type: 'UNKNOWN',
-    position: {
-      longitude: s[5],
-      latitude: s[6],
-      altitude: (s[7] || 0) * 3.28084,
-      heading: s[10] || 0,
-      speed: (s[9] || 0) * 1.94384,
-      verticalRate: (s[11] || 0) * 196.850,
-      geoAltitude: (s[13] || 0) * 3.28084,
-    },
-    timestamp: Date.now(),
-    originCountry: s[2] || 'Unknown',
-    onGround: s[8] || false,
-    squawk: s[14] || null,
-    spi: s[15] || false,
-    positionSource: s[16] || 0,
-    lastContact: s[4] || null,
-  };
 }
 
 // ============================================================================
@@ -115,7 +100,6 @@ interface LoadedRegion {
   fetchedAt: number;
 }
 
-// Check if loaded region covers enough of the current viewport
 function isViewportCovered(
   viewport: ViewportBounds,
   region: LoadedRegion,
@@ -135,7 +119,6 @@ function isViewportCovered(
   return (oArea / vArea) >= threshold;
 }
 
-// Add padding around bounds for prefetching nearby areas
 function padBounds(bounds: ViewportBounds, factor: number): ViewportBounds {
   const latSpan = bounds.maxLat - bounds.minLat;
   const lonSpan = bounds.maxLon - bounds.minLon;
@@ -151,7 +134,6 @@ function padBounds(bounds: ViewportBounds, factor: number): ViewportBounds {
   };
 }
 
-// Check if a position falls within bounds (with optional margin)
 function isInBounds(lat: number, lon: number, bounds: ViewportBounds, margin: number = 0): boolean {
   return (
     lat >= bounds.minLat - margin &&
@@ -184,7 +166,7 @@ export function DataPoller() {
   // Get visible aircraft from cache for given viewport bounds
   const getVisibleFromCache = useCallback((bounds: ViewportBounds): Aircraft[] => {
     const visible: Aircraft[] = [];
-    const margin = 5; // Degrees - generous margin for rendering edge-fading
+    const margin = 5;
 
     aircraftCache.current.forEach(({ aircraft }) => {
       if (isInBounds(aircraft.position.latitude, aircraft.position.longitude, bounds, margin)) {
@@ -223,7 +205,7 @@ export function DataPoller() {
   const fetchData = useCallback(async (bounds: ViewportBounds, force: boolean = false) => {
     if (!isPolling || !bounds) return;
 
-    // Don't fetch when zoomed too far out (would return excessive data)
+    // Don't fetch when zoomed too far out
     if (bounds.zoomLevel > POLLING.MAX_FETCH_ZOOM) {
       console.log('[DataPoller] Zoomed too far out, showing cached data');
       if (aircraftCache.current.size > 0) {
@@ -237,7 +219,6 @@ export function DataPoller() {
       const age = Date.now() - loadedRegion.current.fetchedAt;
       if (age < POLLING.AIRCRAFT_CACHE_TTL &&
           isViewportCovered(bounds, loadedRegion.current, POLLING.COVERAGE_THRESHOLD)) {
-        // Region is fresh and covers viewport - just refresh display from cache
         updateDisplay(bounds);
         return;
       }
@@ -267,32 +248,23 @@ export function DataPoller() {
       });
 
       if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        if (res.status === 429) {
-          const retryAfter = errorData.retryAfter || 10;
-          console.warn(`[DataPoller] Rate limited. Retry in ${retryAfter}s`);
-          consecutiveErrors.current++;
-          throw new Error(`Rate limited - retry in ${retryAfter}s`);
-        }
-        throw new Error(errorData.message || `API error: ${res.status}`);
+        throw new Error(`API error: ${res.status}`);
       }
 
       const data = await res.json();
       consecutiveErrors.current = 0;
 
       const now = Date.now();
-      console.log('[DataPoller] Received', data.states?.length || 0, 'aircraft');
+      const aircraftList: Aircraft[] = data.aircraft || [];
+      console.log('[DataPoller] Received', aircraftList.length, 'aircraft');
 
-      if (data.states && data.states.length > 0) {
-        // Merge new aircraft into cache (update existing, add new)
-        for (const state of data.states) {
-          const ac = parseStateVector(state);
-          if (ac) {
-            aircraftCache.current.set(ac.id, { aircraft: ac, fetchedAt: now });
-          }
+      if (aircraftList.length > 0) {
+        // Merge into cache — API returns clean Aircraft objects directly
+        for (const ac of aircraftList) {
+          aircraftCache.current.set(ac.id, { aircraft: ac, fetchedAt: now });
         }
 
-        // Update loaded region to the padded fetch area
+        // Update loaded region
         loadedRegion.current = {
           minLat: padded.minLat,
           maxLat: padded.maxLat,
@@ -301,7 +273,6 @@ export function DataPoller() {
           fetchedAt: now,
         };
 
-        // Update store with visible aircraft from cache
         updateDisplay(bounds);
         return;
       }
@@ -311,6 +282,7 @@ export function DataPoller() {
       if (error.name === 'AbortError') return;
 
       console.warn('[DataPoller] API failed:', error.message);
+      consecutiveErrors.current++;
       // Fall back to cache or mock data
       if (aircraftCache.current.size > 0) {
         updateDisplay(bounds);

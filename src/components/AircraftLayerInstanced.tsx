@@ -15,6 +15,8 @@ import {
 import { latLonToVector3Into, getOrientationAtLatLonInto, predictPosition } from '@/utils/geo';
 import { calculateViewVisibility } from '@/utils/lod';
 
+const MAX_AIRCRAFT_INSTANCES = 5000;
+
 // ============================================================================
 // INSTANCED AIRCRAFT LAYER
 // Single InstancedMesh for all aircraft - massive performance improvement
@@ -185,6 +187,17 @@ export function AircraftLayerInstanced() {
     if (!meshRef.current || aircraft.length === 0) return;
     
     const mesh = meshRef.current;
+
+    // Set actual instance count (args uses fixed MAX for stable mesh identity)
+    mesh.count = aircraft.length;
+    if (hitboxRef.current) {
+      hitboxRef.current.count = aircraft.length;
+      // Ensure bounding sphere covers globe for reliable raycasting
+      if (!hitboxRef.current.boundingSphere) {
+        hitboxRef.current.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 2);
+      }
+    }
+
     const { dummy, color, frustum, projScreenMatrix, vec3_a } = allocs.current;
     const now = Date.now();
     const elapsedTime = state.clock.elapsedTime;
@@ -313,11 +326,13 @@ export function AircraftLayerInstanced() {
         hitboxRef.current.setMatrixAt(i, dummy.matrix);
       }
       
-      // Update color based on selection/hover state
+      // Update color based on selection/hover/military state
       if (isSelected) {
         color.set(COLORS.AIRCRAFT_SELECTED);
       } else if (isHovered) {
         color.set(COLORS.AIRCRAFT_HOVERED);
+      } else if (ac.isMilitary) {
+        color.set(COLORS.AIRCRAFT_MILITARY);
       } else {
         color.set(COLORS.AIRCRAFT_DEFAULT);
       }
@@ -364,7 +379,7 @@ export function AircraftLayerInstanced() {
       {/* Invisible hitbox mesh for pointer detection (larger geometry) */}
       <instancedMesh
         ref={hitboxRef}
-        args={[hitboxGeometry, undefined, aircraft.length]}
+        args={[hitboxGeometry, undefined, MAX_AIRCRAFT_INSTANCES]}
         onPointerOver={handlePointerOver}
         onPointerOut={handlePointerOut}
         onClick={handleClick}
@@ -381,7 +396,7 @@ export function AircraftLayerInstanced() {
       {/* Visible instanced mesh for all aircraft - raycast disabled, hitbox handles events */}
       <instancedMesh
         ref={meshRef}
-        args={[geometry, undefined, aircraft.length]}
+        args={[geometry, undefined, MAX_AIRCRAFT_INSTANCES]}
         frustumCulled={false}
         raycast={() => null}
       >

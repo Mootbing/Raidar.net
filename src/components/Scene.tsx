@@ -1,7 +1,7 @@
 'use client';
 
 import { Canvas } from '@react-three/fiber';
-import { Stars, PerspectiveCamera, AdaptiveDpr } from '@react-three/drei';
+import { PerspectiveCamera, AdaptiveDpr } from '@react-three/drei';
 import { Globe } from './Globe';
 import { CountryBorders } from './CountryBorders';
 import { AircraftLayerInstanced } from './AircraftLayerInstanced';
@@ -49,7 +49,6 @@ export function Scene() {
         <color attach="background" args={[COLORS.BG_DARK]} />
         <PerspectiveCamera makeDefault position={[0, 0, CAMERA.DEFAULT_DISTANCE]} fov={60} />
         <AdaptiveDpr pixelated />
-        <Stars radius={100} depth={50} count={2000} factor={3} saturation={0} fade speed={0.2} />
         <Suspense fallback={<LoadingFallback />}>
           {/* Base layers */}
           <Globe />

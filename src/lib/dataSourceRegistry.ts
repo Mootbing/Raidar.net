@@ -77,32 +77,7 @@ export function getRegisteredLayers(): LayerId[] {
 registerDataSource({
   layerId: 'aircraft',
   buildUrl: (bounds) => `/api/aircraft?${boundsToParams(bounds)}`,
-  parseResponse: (json) => {
-    if (!json.states) return [];
-    return json.states
-      .filter((s: any[]) => s[5] != null && s[6] != null) // eslint-disable-line @typescript-eslint/no-explicit-any
-      .map((s: any[]) => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
-        id: s[0],
-        callsign: (s[1] || '').trim() || 'N/A',
-        type: 'UNKNOWN',
-        position: {
-          longitude: s[5],
-          latitude: s[6],
-          altitude: (s[7] || 0) * 3.28084,
-          heading: s[10] || 0,
-          speed: (s[9] || 0) * 1.94384,
-          verticalRate: (s[11] || 0) * 196.850,
-          geoAltitude: (s[13] || 0) * 3.28084,
-        },
-        timestamp: Date.now(),
-        originCountry: s[2] || 'Unknown',
-        onGround: s[8] || false,
-        squawk: s[14] || null,
-        spi: s[15] || false,
-        positionSource: s[16] || 0,
-        lastContact: s[4] || null,
-      }));
-  },
+  parseResponse: (json) => json.aircraft ?? [],
   getLatLon: (a: any) => ({ lat: a.position.latitude, lon: a.position.longitude }), // eslint-disable-line @typescript-eslint/no-explicit-any
   pollInterval: 15_000,
 });
@@ -121,15 +96,29 @@ registerDataSource({
 });
 
 /**
- * Satellites — TLE / orbital data
- * Global fetch (not viewport-scoped) — satellites are propagated client-side.
+ * Satellites — TLE / orbital data from CelesTrak
+ * Global fetch (not viewport-scoped) — positions propagated client-side via SGP4.
+ * TLE data only changes every few hours, so long poll interval.
  */
 registerDataSource({
   layerId: 'satellites',
   buildUrl: () => `/api/satellites`,
-  parseResponse: (json) => json.satellites ?? [],
+  parseResponse: (json) => {
+    const sats = json.satellites ?? [];
+    return sats.map((s: any) => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
+      id: s.id || s.noradId,
+      name: s.name,
+      noradId: s.noradId,
+      tle1: s.tle1,
+      tle2: s.tle2,
+      group: s.group || 'unknown',
+      intlDesignator: s.intlDesignator || '',
+      lat: 0,
+      lon: 0,
+    }));
+  },
   getLatLon: (s: any) => ({ lat: s.lat ?? 0, lon: s.lon ?? 0 }), // eslint-disable-line @typescript-eslint/no-explicit-any
-  pollInterval: 300_000, // TLE data refreshes infrequently
+  pollInterval: 300_000,
   global: true,
 });
 

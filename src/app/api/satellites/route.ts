@@ -1,26 +1,40 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
+import { getDb } from '@/db/client';
+import { satelliteTle } from '@/db/schema';
 
 /**
  * Satellite Data API
  *
- * Serves TLE (Two-Line Element) data for satellite position propagation.
- * Client-side SGP4 propagation is preferred for real-time updates.
- *
- * Data sources:
- * - CelesTrak (free): https://celestrak.org/NORAD/elements/
- *   - Active satellites: https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=tle
- *   - Starlink: https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=tle
- *   - Military: https://celestrak.org/NORAD/elements/gp.php?GROUP=military&FORMAT=tle
- * - Space-Track (requires login): https://www.space-track.org
- * - N2YO API: https://www.n2yo.com/api/
- *
- * Client library: satellite.js (npm install satellite.js)
- *   - Parse TLE -> propagate with SGP4 -> get lat/lon/alt at any time
- *
- * Returns: { satellites: { name, noradId, tle1, tle2 }[] }
+ * Reads TLE data from Neon Postgres (populated by the fetcher process).
+ * Returns all satellites globally — client-side SGP4 propagation handles positioning.
  */
-export async function GET(_request: NextRequest) {
-  // TODO: Fetch TLE data from CelesTrak or Space-Track
-  // TLE data updates every few hours, so cache aggressively
-  return NextResponse.json({ satellites: [], source: 'placeholder' });
+
+export async function GET() {
+  try {
+    const db = getDb();
+    const rows = await db.select().from(satelliteTle);
+
+    const satellites = rows.map(row => ({
+      id: row.noradId,
+      name: row.name,
+      noradId: row.noradId,
+      tle1: row.tleLine1,
+      tle2: row.tleLine2,
+      group: row.tleGroup || 'unknown',
+      intlDesignator: row.intlDesignator || '',
+    }));
+
+    return NextResponse.json({
+      satellites,
+      source: 'neon',
+      cached: false,
+      count: satellites.length,
+    });
+  } catch (error) {
+    console.error('[Satellites] DB query error:', error);
+    return NextResponse.json(
+      { satellites: [], error: 'Failed to fetch satellite data' },
+      { status: 502 }
+    );
+  }
 }

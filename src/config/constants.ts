@@ -286,6 +286,7 @@ export const COLORS = {
   AIRCRAFT_DEFAULT: '#00ff88',
   AIRCRAFT_SELECTED: '#00ddff',
   AIRCRAFT_HOVERED: '#00ffcc',
+  AIRCRAFT_MILITARY: '#ff6644',
   
   // Airports
   AIRPORT_DEFAULT: '#ffffff',

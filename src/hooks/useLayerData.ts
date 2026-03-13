@@ -54,23 +54,28 @@ export function useLayerData<T extends { id: string }>(layerId: LayerId): T[] {
   const maxFetchZoom = source?.maxFetchZoom ?? POLLING.MAX_FETCH_ZOOM;
   const isGlobal = source?.global ?? false;
 
+  // Global layers store all entities directly (no viewport filtering)
+  const globalEntitiesRef = useRef<T[]>([]);
+
   // ----- core fetch ----------------------------------------------------------
   const doFetch = useCallback(
-    async (bounds: ViewportBounds, force: boolean = false) => {
+    async (bounds: ViewportBounds | null, force: boolean = false) => {
       if (!source || !cacheRef.current) return;
       if (!layerState?.enabled) return;
-      if (!isGlobal && bounds.zoomLevel > maxFetchZoom) {
-        // Too far out — just show cached
-        visibleRef.current = cacheRef.current.getVisible(bounds);
-        setLayerState(layerId, { entityCount: visibleRef.current.length });
-        return;
-      }
 
-      // Skip if loaded region still covers the viewport
-      if (!force && !isGlobal && cacheRef.current.isRegionFresh(bounds)) {
-        visibleRef.current = cacheRef.current.getVisible(bounds);
-        setLayerState(layerId, { entityCount: visibleRef.current.length });
-        return;
+      // Non-global layers need valid bounds
+      if (!isGlobal) {
+        if (!bounds) return;
+        if (bounds.zoomLevel > maxFetchZoom) {
+          visibleRef.current = cacheRef.current.getVisible(bounds);
+          setLayerState(layerId, { entityCount: visibleRef.current.length });
+          return;
+        }
+        if (!force && cacheRef.current.isRegionFresh(bounds)) {
+          visibleRef.current = cacheRef.current.getVisible(bounds);
+          setLayerState(layerId, { entityCount: visibleRef.current.length });
+          return;
+        }
       }
 
       abortRef.current?.abort();
@@ -79,8 +84,11 @@ export function useLayerData<T extends { id: string }>(layerId: LayerId): T[] {
 
       setLayerState(layerId, { loading: true, error: null });
 
-      const padded = isGlobal ? bounds : cacheRef.current.padBounds(bounds);
-      const url = source.buildUrl(padded);
+      // Global layers don't need bounds for URL or cache
+      const fetchBounds = isGlobal
+        ? { minLat: -90, maxLat: 90, minLon: -180, maxLon: 180, centerLat: 0, centerLon: 0, zoomLevel: 0 }
+        : cacheRef.current.padBounds(bounds!);
+      const url = source.buildUrl(fetchBounds);
 
       try {
         const res = await fetch(url, { signal: controller.signal });
@@ -92,8 +100,15 @@ export function useLayerData<T extends { id: string }>(layerId: LayerId): T[] {
         const entities = source.parseResponse(json);
 
         errorsRef.current = 0;
-        cacheRef.current.merge(entities, padded);
-        visibleRef.current = cacheRef.current.getVisible(bounds);
+
+        if (isGlobal) {
+          // Global layers: store all entities directly, skip spatial filtering
+          globalEntitiesRef.current = entities;
+          visibleRef.current = entities;
+        } else {
+          cacheRef.current.merge(entities, fetchBounds);
+          visibleRef.current = cacheRef.current.getVisible(bounds!);
+        }
 
         setLayerState(layerId, {
           loading: false,
@@ -103,8 +118,13 @@ export function useLayerData<T extends { id: string }>(layerId: LayerId): T[] {
       } catch (e: unknown) {
         if ((e as Error).name === 'AbortError') return;
         errorsRef.current++;
-        // Still show cached data on error
-        visibleRef.current = cacheRef.current.getVisible(bounds);
+
+        if (isGlobal) {
+          visibleRef.current = globalEntitiesRef.current;
+        } else if (bounds) {
+          visibleRef.current = cacheRef.current.getVisible(bounds);
+        }
+
         setLayerState(layerId, {
           loading: false,
           error: (e as Error).message || 'Unknown error',
@@ -122,7 +142,8 @@ export function useLayerData<T extends { id: string }>(layerId: LayerId): T[] {
     if (!isGlobal && !viewportBounds) return;
 
     initRef.current = true;
-    doFetch(viewportBounds!, true);
+    // Global layers can fetch with null bounds (doFetch handles it)
+    doFetch(viewportBounds, true);
   }, [layerState?.enabled, locationReady, viewportBounds, isGlobal, source, doFetch]);
 
   // ----- viewport change → refetch / update visible -------------------------

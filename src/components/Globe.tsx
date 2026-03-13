@@ -14,7 +14,7 @@ export function Globe() {
   });
   
   return (
-    <mesh ref={globeRef}>
+    <mesh ref={globeRef} raycast={() => null}>
       <sphereGeometry args={[EARTH_RADIUS, 64, 64]} />
       <meshBasicMaterial color="#000000" />
     </mesh>
