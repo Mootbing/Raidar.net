@@ -427,14 +427,14 @@ function SmallAirportsInstanced({ airports }: { airports: Airport[] }) {
 export function AirportsLayer() {
   const airports = useRadarStore((state) => state.airports);
   const fetchAirports = useRadarStore((state) => state.fetchAirports);
-  const locationReady = useRadarStore((state) => state.locationReady);
+  const dataFetchReady = useRadarStore((state) => state.dataFetchReady);
   const setLayerState = useRadarStore((state) => state.setLayerState);
 
   useEffect(() => {
-    if (locationReady) {
+    if (dataFetchReady) {
       fetchAirports();
     }
-  }, [locationReady, fetchAirports]);
+  }, [dataFetchReady, fetchAirports]);
 
   useEffect(() => {
     setLayerState('airports', { entityCount: airports.length });

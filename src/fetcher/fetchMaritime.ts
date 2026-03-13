@@ -304,7 +304,20 @@ function connect(): void {
 
   ws.on('message', (data) => {
     try {
-      const msg = JSON.parse(data.toString());
+      const raw = data.toString();
+      const msg = JSON.parse(raw);
+
+      // Log server errors
+      if (msg.error) {
+        console.error(`[Maritime] Server error: ${msg.error}`);
+        return;
+      }
+
+      // Log first message as confirmation
+      if (messageCount === 0) {
+        console.log(`[Maritime] First AIS message received: ${msg.MessageType} (MMSI ${msg.MetaData?.MMSI})`);
+      }
+
       handleMessage(msg);
     } catch {
       // Ignore malformed messages
@@ -338,6 +351,15 @@ export function startMaritimeStream(): { stop: () => void } {
   flushTimer = setInterval(() => flushBuffer(), FLUSH_INTERVAL);
   cleanupTimer = setInterval(() => cleanStaleRecords(), STALE_CLEANUP_INTERVAL);
 
+  // Periodic status log every 30s
+  const statusTimer = setInterval(() => {
+    if (vesselBuffer.size > 0 || messageCount > 0) {
+      console.log(`[Maritime] Status: ${vesselBuffer.size} vessels buffered, ${messageCount} msgs received`);
+    } else {
+      console.log(`[Maritime] Status: waiting for AIS data (ws ${ws?.readyState === WebSocket.OPEN ? 'connected' : 'disconnected'})`);
+    }
+  }, 30_000);
+
   // Also clean stale on startup
   cleanStaleRecords();
 
@@ -346,6 +368,7 @@ export function startMaritimeStream(): { stop: () => void } {
       shouldRun = false;
       if (flushTimer) clearInterval(flushTimer);
       if (cleanupTimer) clearInterval(cleanupTimer);
+      clearInterval(statusTimer);
       if (ws) {
         ws.removeAllListeners();
         ws.close();

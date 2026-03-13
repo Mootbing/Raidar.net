@@ -179,10 +179,18 @@ interface Store {
   setViewportBounds: (bounds: ViewportBounds) => void;
   locationReady: boolean;
   setLocationReady: (ready: boolean) => void;
-  
-  // Intro animation phases: 'loading' -> 'borders' -> 'airports' -> 'docks' -> 'maritime' -> 'aircraft' -> 'satellites' -> 'complete'
-  introPhase: 'loading' | 'borders' | 'airports' | 'docks' | 'maritime' | 'aircraft' | 'satellites' | 'complete';
-  setIntroPhase: (phase: 'loading' | 'borders' | 'airports' | 'docks' | 'maritime' | 'aircraft' | 'satellites' | 'complete') => void;
+
+  // Data prefetch gate (set before locationReady to allow data fetching during loading)
+  dataFetchReady: boolean;
+  setDataFetchReady: (ready: boolean) => void;
+
+  // Track which data sources have completed initial load
+  dataLoadState: Record<string, boolean>;
+  setDataLoaded: (source: string) => void;
+
+  // Intro animation phases: 'loading' -> 'borders' -> 'airports' -> 'docks' -> 'maritime' -> 'aircraft' -> 'news' -> 'satellites' -> 'complete'
+  introPhase: 'loading' | 'borders' | 'airports' | 'docks' | 'maritime' | 'aircraft' | 'news' | 'satellites' | 'complete';
+  setIntroPhase: (phase: 'loading' | 'borders' | 'airports' | 'docks' | 'maritime' | 'aircraft' | 'news' | 'satellites' | 'complete') => void;
 
   // Loading progress (0-100) for syncing animations
   loadingProgress: number;
@@ -479,7 +487,15 @@ export const useRadarStore = create<Store>((set, get) => ({
   
   locationReady: false,
   setLocationReady: (ready) => set({ locationReady: ready }),
-  
+
+  // Data prefetch
+  dataFetchReady: false,
+  setDataFetchReady: (ready) => set({ dataFetchReady: ready }),
+  dataLoadState: {},
+  setDataLoaded: (source) => set((s) => ({
+    dataLoadState: { ...s.dataLoadState, [source]: true },
+  })),
+
   // Intro animation
   introPhase: 'loading',
   setIntroPhase: (phase) => set({ introPhase: phase }),
@@ -560,32 +576,35 @@ export const useRadarStore = create<Store>((set, get) => ({
 
   fetchAirports: async () => {
     const { airports, airportsLoading } = get();
-    
+
     if (airports.length > 0 || airportsLoading) {
+      if (airports.length > 0) get().setDataLoaded('airports');
       return;
     }
-    
+
     set({ airportsLoading: true, airportsError: null });
-    
+
     try {
       const res = await fetch('/api/airports');
       if (!res.ok) {
         throw new Error(`API error: ${res.status}`);
       }
-      
+
       const data = await res.json();
       console.log(`[Airports] Loaded ${data.airports.length} airports`);
-      
-      set({ 
-        airports: data.airports, 
-        airportsLoading: false 
+
+      set({
+        airports: data.airports,
+        airportsLoading: false
       });
+      get().setDataLoaded('airports');
     } catch (error) {
       console.error('[Airports] Failed to fetch:', error);
-      set({ 
-        airportsLoading: false, 
-        airportsError: error instanceof Error ? error.message : 'Unknown error' 
+      set({
+        airportsLoading: false,
+        airportsError: error instanceof Error ? error.message : 'Unknown error'
       });
+      get().setDataLoaded('airports');
     }
   },
 }));

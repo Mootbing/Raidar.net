@@ -15,47 +15,105 @@ const Scene = dynamic(() => import('@/components/Scene').then((mod) => mod.Scene
   loading: () => null,
 });
 
+// Cosmetic stages for the first 0-50% of loading (borders drawing)
+const COSMETIC_STAGES = [
+  { text: 'INITIALIZING_RENDERER', duration: 500 },
+  { text: 'DRAWING_BORDERS', duration: 500 },
+  { text: 'RENDERING_COASTLINES', duration: 500 },
+];
+
+// Data sources to track, in sweep order
+const SWEEP_SOURCES = ['airports', 'docks', 'maritime', 'aircraft', 'news', 'satellites'] as const;
+const SWEEP_PHASES = ['airports', 'docks', 'maritime', 'aircraft', 'news', 'satellites'] as const;
+const SWEEP_TEXTS = [
+  'LOADING_AIRPORT_DATA',
+  'FETCHING_DOCK_POSITIONS',
+  'FETCHING_MARITIME_DATA',
+  'FETCHING_AIRCRAFT_DATA',
+  'SCANNING_NEWS_FEEDS',
+  'TRACKING_SATELLITES',
+];
+const SWEEP_DELAY = 400; // ms minimum between sweep animations
+const MAX_LOADING_TIMEOUT = 15000; // Force completion after 15s
+
 function LoadingOverlay() {
   const setIntroPhase = useRadarStore((s) => s.setIntroPhase);
   const setLoadingProgress = useRadarStore((s) => s.setLoadingProgress);
   const setLocationReady = useRadarStore((s) => s.setLocationReady);
-  const [stageIndex, setStageIndex] = useState(0);
+  const setDataFetchReady = useRadarStore((s) => s.setDataFetchReady);
+  const fetchAirports = useRadarStore((s) => s.fetchAirports);
+  const dataLoadState = useRadarStore((s) => s.dataLoadState);
+
   const [progress, setProgress] = useState(0);
   const [done, setDone] = useState(false);
+  const [stageText, setStageText] = useState(COSMETIC_STAGES[0].text);
 
-  // Start borders animation immediately on mount (synced with loading progress 0-100%)
+  // Phase 1: Cosmetic stage cycling (0-50%)
+  const [cosmeticIdx, setCosmeticIdx] = useState(0);
+
+  // Phase 2: Sequential sweep tracking
+  const [nextSweepIdx, setNextSweepIdx] = useState(0);
+  const lastSweepTime = useRef(0);
+
+  // ---- On mount: start borders drawing and trigger data fetches ----
   useEffect(() => {
     setIntroPhase('borders');
-  }, [setIntroPhase]);
+    // Fetch airports immediately (no viewport needed)
+    fetchAirports();
+    // Allow viewport-dependent fetches after viewport tracker initializes
+    const timer = setTimeout(() => {
+      setDataFetchReady(true);
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [setIntroPhase, fetchAirports, setDataFetchReady]);
 
-  // Sync loading progress to global store for CountryBorders
+  // ---- Phase 1: Cosmetic stages (progress 0→50%) ----
   useEffect(() => {
-    setLoadingProgress(progress);
-  }, [progress, setLoadingProgress]);
+    if (done || cosmeticIdx >= COSMETIC_STAGES.length) return;
 
-  // Cycle through loading stages
-  useEffect(() => {
-    if (done) return;
-
-    const stage = INTRO.STAGES[stageIndex];
-    if (!stage) return;
+    setStageText(COSMETIC_STAGES[cosmeticIdx].text);
 
     const timer = setTimeout(() => {
-      if (stageIndex < INTRO.STAGES.length - 1) {
-        setStageIndex(prev => prev + 1);
-      }
-    }, stage.duration);
+      setCosmeticIdx(prev => prev + 1);
+    }, COSMETIC_STAGES[cosmeticIdx].duration);
 
     return () => clearTimeout(timer);
-  }, [stageIndex, done]);
+  }, [cosmeticIdx, done]);
 
-  // Animate progress
+  // ---- Phase 2: Trigger sweeps in order as data arrives ----
+  useEffect(() => {
+    if (done || nextSweepIdx >= SWEEP_SOURCES.length) return;
+
+    const source = SWEEP_SOURCES[nextSweepIdx];
+    if (!dataLoadState[source]) return; // Wait for this source
+
+    const now = Date.now();
+    const minDelay = Math.max(0, SWEEP_DELAY - (now - lastSweepTime.current));
+
+    const timer = setTimeout(() => {
+      setIntroPhase(SWEEP_PHASES[nextSweepIdx]);
+      setStageText(SWEEP_TEXTS[nextSweepIdx]);
+      lastSweepTime.current = Date.now();
+      setNextSweepIdx(prev => prev + 1);
+    }, minDelay);
+
+    return () => clearTimeout(timer);
+  }, [nextSweepIdx, dataLoadState, done, setIntroPhase]);
+
+  // ---- Smooth progress animation ----
   useEffect(() => {
     if (done) return;
 
     const interval = setInterval(() => {
       setProgress(prev => {
-        const targetProgress = ((stageIndex + 1) / INTRO.STAGES.length) * 100;
+        // Phase 1 target: cosmetic stages → 0-50%
+        const cosmeticTarget = Math.min(50, ((cosmeticIdx + 1) / COSMETIC_STAGES.length) * 50);
+
+        // Phase 2 target: data sources → 50-100%
+        const loadedCount = SWEEP_SOURCES.filter(s => dataLoadState[s]).length;
+        const dataTarget = 50 + (loadedCount / SWEEP_SOURCES.length) * 50;
+
+        const targetProgress = Math.max(cosmeticTarget, dataTarget);
         const jitter = Math.random() * INTRO.PROGRESS_JITTER - 1;
         const newProgress = prev + (targetProgress - prev) * INTRO.PROGRESS_SMOOTH_FACTOR + jitter;
         return Math.min(Math.max(newProgress, prev), 99);
@@ -63,57 +121,50 @@ function LoadingOverlay() {
     }, INTRO.PROGRESS_INTERVAL);
 
     return () => clearInterval(interval);
-  }, [stageIndex, done]);
+  }, [cosmeticIdx, dataLoadState, done]);
 
-  // Sequential sweep phases triggered at progress milestones (50-100%)
-  const sweepPhaseRef = useRef(0);
-  const SWEEP_DELAY = 500; // ms between each layer sweep
-
+  // ---- Sync progress to store (for CountryBorders) ----
   useEffect(() => {
-    // At ~50% progress (stage 4 of 8), borders are fully drawn — start sweeps
-    const halfwayStage = Math.floor(INTRO.STAGES.length / 2);
-    if (stageIndex >= halfwayStage && sweepPhaseRef.current === 0) {
-      sweepPhaseRef.current = 1;
-      setIntroPhase('airports');
+    setLoadingProgress(progress);
+  }, [progress, setLoadingProgress]);
 
-      // Sequential sweep: airports → docks → maritime → aircraft → satellites
-      setTimeout(() => {
-        setIntroPhase('docks');
-      }, SWEEP_DELAY);
-
-      setTimeout(() => {
-        setIntroPhase('maritime');
-      }, SWEEP_DELAY * 2);
-
-      setTimeout(() => {
-        setIntroPhase('aircraft');
-      }, SWEEP_DELAY * 3);
-
-      setTimeout(() => {
-        setIntroPhase('satellites');
-      }, SWEEP_DELAY * 4);
-    }
-  }, [stageIndex, setIntroPhase]);
-
-  // When last loading stage is reached, finalize
+  // ---- Finalize when all data sources have loaded ----
   useEffect(() => {
-    if (stageIndex < INTRO.STAGES.length - 1) return;
-    if (done) return;
+    const allLoaded = SWEEP_SOURCES.every(s => dataLoadState[s]);
+    if (!allLoaded || done) return;
 
-    const finishTimer = setTimeout(() => {
+    // Wait for last sweep to trigger before finalizing
+    const timer = setTimeout(() => {
+      setDone(true);
+      setProgress(100);
+      setLoadingProgress(100);
+      setStageText('SYSTEM_READY');
+
+      setTimeout(() => {
+        setIntroPhase('complete');
+        setLocationReady(true);
+      }, 300);
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [dataLoadState, done, setIntroPhase, setLoadingProgress, setLocationReady]);
+
+  // ---- Safety timeout: force completion if loading hangs ----
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (done) return;
+      console.warn('[LoadingOverlay] Loading timeout — forcing completion');
       setDone(true);
       setProgress(100);
       setLoadingProgress(100);
       setIntroPhase('complete');
       setLocationReady(true);
-    }, INTRO.STAGES[INTRO.STAGES.length - 1].duration);
-
-    return () => clearTimeout(finishTimer);
-  }, [stageIndex, done, setIntroPhase, setLoadingProgress, setLocationReady]);
+      setDataFetchReady(true);
+    }, MAX_LOADING_TIMEOUT);
+    return () => clearTimeout(timer);
+  }, [done, setIntroPhase, setLoadingProgress, setLocationReady, setDataFetchReady]);
 
   const displayProgress = done ? 100 : progress;
-
-  const currentStage = INTRO.STAGES[stageIndex] || INTRO.STAGES[INTRO.STAGES.length - 1];
 
   return (
     <div
@@ -150,7 +201,7 @@ function LoadingOverlay() {
 
         {/* Status line: stage text - percentage - absolutely positioned */}
         <div className={`absolute bottom-0 left-0 right-0 text-center ${TEXT.BASE} ${TEXT.MUTED} tracking-[0.15em]`}>
-          {currentStage.text} — {Math.floor(displayProgress)}%
+          {stageText} — {Math.floor(displayProgress)}%
         </div>
       </div>
     </div>
@@ -160,7 +211,7 @@ function LoadingOverlay() {
 export default function Home() {
   // Initialize global input manager
   useInputManagerInit();
-  
+
   return (
     <ErrorBoundary>
       <main className="w-full h-screen overflow-hidden bg-black">

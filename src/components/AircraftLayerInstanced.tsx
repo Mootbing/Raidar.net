@@ -1,17 +1,16 @@
 'use client';
 
-import { useRef, useEffect, useMemo } from 'react';
-import { useThree, useFrame } from '@react-three/fiber';
+import { useRef, useEffect, useMemo, useCallback } from 'react';
+import { useThree, useFrame, ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useRadarStore } from '@/store/gameStore';
 import { FlightPath } from './FlightPath';
-import { useEntityInteraction, ensureBoundingSphere } from '@/hooks/useEntityInteraction';
 import { AIRCRAFT, COLORS } from '@/config/constants';
-import {
-  getAircraftTriangleGeometry,
+import { 
+  getAircraftTriangleGeometry, 
   getAircraftPlaneGeometry,
   getAircraftHitboxGeometry,
-  createRenderLoopAllocations
+  createRenderLoopAllocations 
 } from '@/utils/sharedGeometry';
 import { latLonToVector3Into, getOrientationAtLatLonInto, predictPosition } from '@/utils/geo';
 import { calculateViewVisibility } from '@/utils/lod';
@@ -49,12 +48,13 @@ export function AircraftLayerInstanced() {
   
   // Store selectors
   const aircraft = useRadarStore((state) => state.aircraft);
+  const selectEntity = useRadarStore((state) => state.selectEntity);
   const removeAircraft = useRadarStore((state) => state.removeAircraft);
+  const hoverEntity = useRadarStore((state) => state.hoverEntity);
   const hoveredEntity = useRadarStore((state) => state.gameState.hoveredEntity);
   const selectedEntity = useRadarStore((state) => state.gameState.selectedEntity);
   const introPhase = useRadarStore((state) => state.introPhase);
   const setLayerState = useRadarStore((state) => state.setLayerState);
-  const { indexToIdRef, handlers } = useEntityInteraction('aircraft');
 
   // Update aircraft entity count for layer panel
   useEffect(() => {
@@ -74,7 +74,7 @@ export function AircraftLayerInstanced() {
   
   // ID to instance index mapping
   const idToIndex = useRef<Map<string, number>>(new Map());
-  const indexToId = indexToIdRef;
+  const indexToId = useRef<string[]>([]);
   
   // Visibility tracking for deloading
   const outOfViewSince = useRef<Map<string, number>>(new Map());
@@ -198,7 +198,10 @@ export function AircraftLayerInstanced() {
     mesh.count = aircraft.length;
     if (hitboxRef.current) {
       hitboxRef.current.count = aircraft.length;
-      ensureBoundingSphere(hitboxRef.current);
+      // Ensure bounding sphere covers globe for reliable raycasting
+      if (!hitboxRef.current.boundingSphere) {
+        hitboxRef.current.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 2);
+      }
     }
 
     const { dummy, color, frustum, projScreenMatrix, vec3_a } = allocs.current;
@@ -355,6 +358,25 @@ export function AircraftLayerInstanced() {
     }
   });
   
+  // Pointer event handlers
+  const handlePointerOver = useCallback((e: ThreeEvent<PointerEvent>) => {
+    e.stopPropagation();
+    if (e.instanceId !== undefined && indexToId.current[e.instanceId]) {
+      hoverEntity({ type: 'aircraft', id: indexToId.current[e.instanceId] });
+    }
+  }, [hoverEntity]);
+  
+  const handlePointerOut = useCallback(() => {
+    hoverEntity(null);
+  }, [hoverEntity]);
+  
+  const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
+    e.stopPropagation();
+    if (e.instanceId !== undefined && indexToId.current[e.instanceId]) {
+      selectEntity({ type: 'aircraft', id: indexToId.current[e.instanceId] });
+    }
+  }, [selectEntity]);
+  
   if (aircraft.length === 0) return null;
   
   return (
@@ -366,7 +388,9 @@ export function AircraftLayerInstanced() {
       <instancedMesh
         ref={hitboxRef}
         args={[hitboxGeometry, undefined, MAX_AIRCRAFT_INSTANCES]}
-        {...handlers}
+        onPointerOver={handlePointerOver}
+        onPointerOut={handlePointerOut}
+        onClick={handleClick}
         frustumCulled={false}
       >
         <meshBasicMaterial 

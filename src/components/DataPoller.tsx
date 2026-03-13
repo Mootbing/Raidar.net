@@ -76,12 +76,14 @@ function isInBounds(lat: number, lon: number, bounds: ViewportBounds, margin: nu
 export function DataPoller() {
   const isPolling = useRadarStore((state) => state.isPolling);
   const setAircraft = useRadarStore((state) => state.setAircraft);
-  const locationReady = useRadarStore((state) => state.locationReady);
+  const dataFetchReady = useRadarStore((state) => state.dataFetchReady);
   const aircraftEnabled = useRadarStore((state) => state.layers.aircraft?.enabled);
+  const setDataLoaded = useRadarStore((state) => state.setDataLoaded);
 
   const hasInitialized = useRef(false);
   const fetchController = useRef<AbortController | null>(null);
   const consecutiveErrors = useRef(0);
+  const dataLoadedReported = useRef(false);
 
   // Track visible aircraft IDs to avoid unnecessary setAircraft calls
   const lastVisibleIdsRef = useRef<Set<string>>(new Set());
@@ -203,6 +205,12 @@ export function DataPoller() {
       };
 
       updateDisplay(bounds);
+
+      // Report aircraft data loaded for loading screen tracking
+      if (!dataLoadedReported.current) {
+        dataLoadedReported.current = true;
+        setDataLoaded('aircraft');
+      }
     } catch (e: unknown) {
       const error = e as Error;
       if (error.name === 'AbortError') return;
@@ -213,8 +221,13 @@ export function DataPoller() {
       if (aircraftCache.current.size > 0) {
         updateDisplay(bounds);
       }
+      // Report loaded even on error so loading screen proceeds
+      if (!dataLoadedReported.current) {
+        dataLoadedReported.current = true;
+        setDataLoaded('aircraft');
+      }
     }
-  }, [isPolling, aircraftEnabled, updateDisplay]);
+  }, [isPolling, aircraftEnabled, updateDisplay, setDataLoaded]);
 
   // Reset init flag when aircraft layer is toggled off
   useEffect(() => {
@@ -223,20 +236,20 @@ export function DataPoller() {
     }
   }, [aircraftEnabled]);
 
-  // Initial fetch - when location and viewport are ready
+  // Initial fetch - when data fetch is allowed and viewport are ready
   useEffect(() => {
-    if (!hasInitialized.current && locationReady && aircraftEnabled) {
+    if (!hasInitialized.current && dataFetchReady && aircraftEnabled) {
       const bounds = useRadarStore.getState().viewportBounds;
       if (bounds) {
         hasInitialized.current = true;
         fetchData(bounds, true);
       }
     }
-  }, [fetchData, locationReady, aircraftEnabled]);
+  }, [fetchData, dataFetchReady, aircraftEnabled]);
 
   // Handle viewport changes via store subscription (avoids React re-renders)
   useEffect(() => {
-    if (!isPolling || !locationReady || !aircraftEnabled) return;
+    if (!isPolling || !dataFetchReady || !aircraftEnabled) return;
 
     let timeout: ReturnType<typeof setTimeout>;
     let prevBounds = useRadarStore.getState().viewportBounds;
@@ -262,11 +275,11 @@ export function DataPoller() {
       unsubscribe();
       clearTimeout(timeout);
     };
-  }, [isPolling, locationReady, aircraftEnabled, fetchData]);
+  }, [isPolling, dataFetchReady, aircraftEnabled, fetchData]);
 
   // Regular polling - force refresh current viewport data
   useEffect(() => {
-    if (!isPolling || !locationReady || !aircraftEnabled) return;
+    if (!isPolling || !dataFetchReady || !aircraftEnabled) return;
 
     const baseInterval = POLLING.BASE_INTERVAL;
     const backoffMultiplier = Math.min(
@@ -282,7 +295,7 @@ export function DataPoller() {
       if (bounds) fetchData(bounds, true);
     }, interval);
     return () => clearInterval(timer);
-  }, [isPolling, fetchData, locationReady, aircraftEnabled]);
+  }, [isPolling, fetchData, dataFetchReady, aircraftEnabled]);
 
   // Cache cleanup - periodically remove stale aircraft far from viewport
   useEffect(() => {

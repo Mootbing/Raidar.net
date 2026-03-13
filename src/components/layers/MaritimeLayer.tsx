@@ -1,7 +1,7 @@
 'use client';
 
-import { useRef, useEffect, useMemo, useState } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useRef, useEffect, useMemo, useCallback, useState } from 'react';
+import { useFrame, ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 
 // Flat triangle geometry for ships — long and narrow like aircraft triangles
@@ -40,9 +40,47 @@ function getShipHitboxGeometry(): THREE.BufferGeometry {
   return _shipHitboxGeometry;
 }
 import { useLayerData } from '@/hooks/useLayerData';
-import { useEntityInteraction, ensureBoundingSphere } from '@/hooks/useEntityInteraction';
 import { useRadarStore } from '@/store/gameStore';
 import { GLOBE, COLORS, DOCKS } from '@/config/constants';
+
+// Swoop ease: starts small, grows BIG, settles to 1.0 (same as AirportsLayer)
+function swoopEase(t: number): number {
+  if (t <= 0) return DOCKS.RIPPLE_MIN_SCALE;
+  if (t >= 1) return 1;
+
+  const peakT = 0.4;
+  const overshoot = DOCKS.RIPPLE_OVERSHOOT;
+  const minScale = DOCKS.RIPPLE_MIN_SCALE;
+
+  if (t < peakT) {
+    const riseProgress = t / peakT;
+    const eased = 1 - Math.pow(1 - riseProgress, 2);
+    return minScale + (overshoot - minScale) * eased;
+  } else {
+    const settleProgress = (t - peakT) / (1 - peakT);
+    const eased = 1 - Math.pow(1 - settleProgress, 3);
+    return overshoot - (overshoot - 1) * eased;
+  }
+}
+
+// Opacity ease: starts low, peaks at 100%, settles to target
+function opacityEase(t: number, targetOpacity: number): number {
+  if (t <= 0) return DOCKS.RIPPLE_MIN_OPACITY;
+  if (t >= 1) return targetOpacity;
+
+  const peakT = 0.4;
+  const minOpacity = DOCKS.RIPPLE_MIN_OPACITY;
+
+  if (t < peakT) {
+    const riseProgress = t / peakT;
+    const eased = 1 - Math.pow(1 - riseProgress, 2);
+    return minOpacity + (1 - minOpacity) * eased;
+  } else {
+    const settleProgress = (t - peakT) / (1 - peakT);
+    const eased = 1 - Math.pow(1 - settleProgress, 3);
+    return 1 - (1 - targetOpacity) * eased;
+  }
+}
 
 /**
  * Maritime Traffic Layer
@@ -87,9 +125,10 @@ export function MaritimeLayer() {
 
   const ships = useLayerData<Ship>('maritime');
   const setLayerEntities = useRadarStore((s) => s.setLayerEntities);
+  const selectEntity = useRadarStore((s) => s.selectEntity);
+  const hoverEntity = useRadarStore((s) => s.hoverEntity);
   const hoveredEntity = useRadarStore((s) => s.gameState.hoveredEntity);
   const selectedEntity = useRadarStore((s) => s.gameState.selectedEntity);
-  const { indexToIdRef, handlers } = useEntityInteraction('ship');
 
   const hoveredShipId = hoveredEntity?.type === 'ship' ? hoveredEntity.id : null;
   const selectedShipId = selectedEntity?.type === 'ship' ? selectedEntity.id : null;
@@ -99,8 +138,8 @@ export function MaritimeLayer() {
   const animationTime = useRef(0);
   const animationStarted = useRef(false);
 
-  // Alias for readability
-  const indexToId = indexToIdRef;
+  // Index mapping for pointer events
+  const indexToId = useRef<string[]>([]);
 
   // Pre-allocate color attribute buffers (pre-filled with default color)
   const colorArray = useMemo(() => {
@@ -172,12 +211,15 @@ export function MaritimeLayer() {
     }
 
     // Ensure hitbox bounding sphere covers globe for reliable raycasting
-    ensureBoundingSphere(hitboxRef.current);
+    if (hitboxRef.current && !hitboxRef.current.boundingSphere) {
+      hitboxRef.current.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 2);
+    }
 
     // Zoom-based scaling (same as aircraft)
     const cameraDistance = state.camera.position.length();
     const zoomScale = Math.max(0.2, Math.min(1.2, cameraDistance / 5));
 
+    let maxProgress = 0;
     const dummy = new THREE.Object3D();
     const count = Math.min(ships.length, MAX_INSTANCES);
     meshRef.current.count = count;
@@ -205,11 +247,9 @@ export function MaritimeLayer() {
       const delay = staggerDelays[i] ?? 0;
       const individualTime = Math.max(0, animationTime.current - delay);
       const individualProgress = animationStarted.current ? Math.min(1, individualTime / DOCKS.RIPPLE_DURATION) : 0;
-      // Overshoot ease: small → BIG → normal
-      const swoopT = individualProgress < 0.5
-        ? 2 * individualProgress * individualProgress
-        : 1 - Math.pow(-2 * individualProgress + 2, 2) / 2;
-      const swoopScale = swoopT <= 0 ? 0 : swoopT < 1 ? DOCKS.RIPPLE_MIN_SCALE + swoopT * (DOCKS.RIPPLE_OVERSHOOT - DOCKS.RIPPLE_MIN_SCALE) * (swoopT < 0.7 ? 1 : (1 - swoopT) / 0.3) : 1;
+      maxProgress = Math.max(maxProgress, individualProgress);
+      // Swoop animation: small → BIG → normal (same as airports/docks)
+      const swoopScale = animationStarted.current ? swoopEase(individualProgress) : 0;
 
       // Scale: base + speed bonus + highlight pulse + sweep + zoom
       const isSelected = ship.id === selectedShipId;
@@ -266,7 +306,42 @@ export function MaritimeLayer() {
         borderMeshRef.current.instanceColor.needsUpdate = true;
       }
     }
+
+    // Global opacity animation (same as airports/docks)
+    const mainMat = meshRef.current.material as THREE.MeshBasicMaterial;
+    mainMat.opacity = opacityEase(maxProgress, 1.0);
+    meshRef.current.visible = maxProgress > 0.01;
+    if (borderMeshRef.current) {
+      const borderMat = borderMeshRef.current.material as THREE.MeshBasicMaterial;
+      borderMat.opacity = opacityEase(maxProgress, 1.0);
+      borderMeshRef.current.visible = maxProgress > 0.01;
+    }
   });
+
+  // Pointer event handlers
+  const handlePointerOver = useCallback(
+    (e: ThreeEvent<PointerEvent>) => {
+      e.stopPropagation();
+      if (e.instanceId !== undefined && indexToId.current[e.instanceId]) {
+        hoverEntity({ type: 'ship', id: indexToId.current[e.instanceId] });
+      }
+    },
+    [hoverEntity]
+  );
+
+  const handlePointerOut = useCallback(() => {
+    hoverEntity(null);
+  }, [hoverEntity]);
+
+  const handleClick = useCallback(
+    (e: ThreeEvent<MouseEvent>) => {
+      e.stopPropagation();
+      if (e.instanceId !== undefined && indexToId.current[e.instanceId]) {
+        selectEntity({ type: 'ship', id: indexToId.current[e.instanceId] });
+      }
+    },
+    [selectEntity]
+  );
 
   const shipGeo = useMemo(() => getShipGeometry(), []);
   const hitboxGeo = useMemo(() => getShipHitboxGeometry(), []);
@@ -279,7 +354,9 @@ export function MaritimeLayer() {
       <instancedMesh
         ref={hitboxRef}
         args={[hitboxGeo, undefined, MAX_INSTANCES]}
-        {...handlers}
+        onPointerOver={handlePointerOver}
+        onPointerOut={handlePointerOut}
+        onClick={handleClick}
         frustumCulled={false}
       >
         <meshBasicMaterial

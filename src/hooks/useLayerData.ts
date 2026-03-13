@@ -34,7 +34,8 @@ export function useLayerData<T extends { id: string }>(layerId: LayerId): T[] {
   const source = getDataSource(layerId) as DataSource<T> | undefined;
   const layerState = useRadarStore((s) => s.layers[layerId]);
   const setLayerState = useRadarStore((s) => s.setLayerState);
-  const locationReady = useRadarStore((s) => s.locationReady);
+  const dataFetchReady = useRadarStore((s) => s.dataFetchReady);
+  const setDataLoaded = useRadarStore((s) => s.setDataLoaded);
 
   // Force re-render when fetch completes, even if entityCount stays the same
   const [, setLastFetchTime] = useState(0);
@@ -44,6 +45,7 @@ export function useLayerData<T extends { id: string }>(layerId: LayerId): T[] {
   const abortRef = useRef<AbortController | null>(null);
   const errorsRef = useRef(0);
   const initRef = useRef(false);
+  const dataLoadedReported = useRef(false);
   // Store visible entities so we can return them synchronously
   const visibleRef = useRef<T[]>([]);
 
@@ -58,6 +60,14 @@ export function useLayerData<T extends { id: string }>(layerId: LayerId): T[] {
 
   // Global layers store all entities directly (no viewport filtering)
   const globalEntitiesRef = useRef<T[]>([]);
+
+  // Report data loaded (only once per mount cycle)
+  const reportLoaded = useCallback(() => {
+    if (!dataLoadedReported.current) {
+      dataLoadedReported.current = true;
+      setDataLoaded(layerId);
+    }
+  }, [layerId, setDataLoaded]);
 
   // ----- core fetch ----------------------------------------------------------
   const doFetch = useCallback(
@@ -118,6 +128,7 @@ export function useLayerData<T extends { id: string }>(layerId: LayerId): T[] {
           entityCount: visibleRef.current.length,
         });
         setLastFetchTime(Date.now());
+        reportLoaded();
       } catch (e: unknown) {
         if ((e as Error).name === 'AbortError') return;
         errorsRef.current++;
@@ -133,25 +144,26 @@ export function useLayerData<T extends { id: string }>(layerId: LayerId): T[] {
           error: (e as Error).message || 'Unknown error',
           entityCount: visibleRef.current.length,
         });
+        reportLoaded();
       }
     },
-    [source, layerState?.enabled, isGlobal, maxFetchZoom, layerId, setLayerState]
+    [source, layerState?.enabled, isGlobal, maxFetchZoom, layerId, setLayerState, reportLoaded]
   );
 
   // ----- initial fetch -------------------------------------------------------
   useEffect(() => {
     if (initRef.current) return;
-    if (!layerState?.enabled || !locationReady || !source) return;
+    if (!layerState?.enabled || !dataFetchReady || !source) return;
     const bounds = useRadarStore.getState().viewportBounds;
     if (!isGlobal && !bounds) return;
 
     initRef.current = true;
     doFetch(bounds, true);
-  }, [layerState?.enabled, locationReady, isGlobal, source, doFetch]);
+  }, [layerState?.enabled, dataFetchReady, isGlobal, source, doFetch]);
 
   // ----- viewport change via store subscription (avoids React re-renders) ----
   useEffect(() => {
-    if (!layerState?.enabled || !locationReady || isGlobal) return;
+    if (!layerState?.enabled || !dataFetchReady || isGlobal) return;
 
     let timeout: ReturnType<typeof setTimeout>;
     let prevBounds = useRadarStore.getState().viewportBounds;
@@ -177,11 +189,11 @@ export function useLayerData<T extends { id: string }>(layerId: LayerId): T[] {
       unsubscribe();
       clearTimeout(timeout);
     };
-  }, [layerState?.enabled, locationReady, isGlobal, doFetch]);
+  }, [layerState?.enabled, dataFetchReady, isGlobal, doFetch]);
 
   // ----- polling -------------------------------------------------------------
   useEffect(() => {
-    if (!layerState?.enabled || !locationReady || pollInterval <= 0) return;
+    if (!layerState?.enabled || !dataFetchReady || pollInterval <= 0) return;
     if (!isGlobal && !useRadarStore.getState().viewportBounds) return;
 
     const backoff = Math.min(Math.pow(2, errorsRef.current), POLLING.MAX_BACKOFF_MULTIPLIER);
@@ -193,7 +205,7 @@ export function useLayerData<T extends { id: string }>(layerId: LayerId): T[] {
     }, interval);
 
     return () => clearInterval(timer);
-  }, [layerState?.enabled, locationReady, pollInterval, isGlobal, doFetch]);
+  }, [layerState?.enabled, dataFetchReady, pollInterval, isGlobal, doFetch]);
 
   // ----- cache cleanup -------------------------------------------------------
   useEffect(() => {
