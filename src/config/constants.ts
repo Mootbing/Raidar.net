@@ -47,7 +47,13 @@ export const LOCATIONS = {
 export const GLOBE = {
   ALTITUDE_SCALE: 0.0000005,
   AIRPORT_SURFACE_OFFSET: 1.001,
+  DOCK_SURFACE_OFFSET: 1.001,
   BORDER_SURFACE_OFFSET: 1.002,
+  BORDER_HIGHLIGHT_OFFSET: 1.003,
+  NEWS_SURFACE_OFFSET: 1.004,
+  MARITIME_SURFACE_OFFSET: 1.001,
+  SATELLITE_MIN_ALTITUDE: 1.05,   // LEO rendered close to surface
+  SATELLITE_MAX_ALTITUDE: 1.5,    // GEO rendered further out
   EARTH_RADIUS_KM: 6371,
   EARTH_CIRCUMFERENCE_KM: 2 * Math.PI * 6371,
 } as const;
@@ -158,6 +164,12 @@ export const POLLING = {
   MAX_BACKOFF_MULTIPLIER: 8,
   DEBOUNCE_VIEWPORT_CHANGE: 300,
   FLIGHT_TRACK_CACHE_TTL: 60000,
+  // Lazy loading - viewport-based
+  VIEWPORT_PADDING_FACTOR: 1.5,     // Fetch 50% larger area than viewport for prefetching
+  COVERAGE_THRESHOLD: 0.7,          // Re-fetch when <70% of viewport is covered by loaded region
+  AIRCRAFT_CACHE_TTL: 120000,       // Keep aircraft in cache for 2 minutes
+  CACHE_CLEANUP_INTERVAL: 30000,    // Clean stale cache entries every 30s
+  MAX_FETCH_ZOOM: 0.85,             // Don't fetch when zoom level exceeds this (nearly whole globe)
 } as const;
 
 // =============================================================================
@@ -284,6 +296,13 @@ export const COLORS = {
   MODE_AIRCRAFT: { active: '#00ff88', inactive: '#005533', highlighted: '#66ffaa' },
   MODE_AIRPORT: { active: '#ffffff', inactive: '#555555', highlighted: '#cccccc' },
   MODE_MISSILE: { active: '#ff4444', inactive: '#552222', highlighted: '#ff6666' },
+
+  // Layer colors
+  LAYER_MARITIME: '#4488ff',
+  LAYER_SATELLITE: '#ff66aa',
+  LAYER_DOCKS: '#88ccff',
+  LAYER_NEWS: '#ffcc00',
+  LAYER_BORDER_HIGHLIGHT: '#ffaa00',
   
   // General UI
   UI_ACCENT: '#00ff88',
@@ -353,8 +372,13 @@ export const TYPOGRAPHY = {
 export const Z_INDEX = {
   GLOBE: 0,
   BORDERS: 1,
+  BORDER_HIGHLIGHT: 1.5,
+  DOCKS: 2,
   AIRPORTS: 2,
+  MARITIME: 3,
   AIRCRAFT: 3,
+  SATELLITES: 4,
+  NEWS: 5,
   UI_OVERLAY: 10,
   MODAL: 50,
   TOAST: 60,

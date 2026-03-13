@@ -4,16 +4,19 @@ import { useEffect, useCallback, useRef } from 'react';
 import { useRadarStore, ViewportBounds, Aircraft } from '@/store/gameStore';
 import { POLLING } from '@/config/constants';
 
+// ============================================================================
+// MOCK / DEBUG DATA
+// ============================================================================
+
 function generateMockData(bounds: ViewportBounds | null, count: number = 50) {
   const countries = ['United States', 'China', 'Germany', 'United Kingdom', 'France', 'Japan', 'Australia', 'Canada', 'Brazil', 'India'];
   const aircraft = [];
-  
-  // Generate aircraft within bounds (or globally if no bounds)
+
   const latMin = bounds?.minLat ?? -70;
   const latMax = bounds?.maxLat ?? 70;
   const lonMin = bounds?.minLon ?? -180;
   const lonMax = bounds?.maxLon ?? 180;
-  
+
   for (let i = 0; i < count; i++) {
     const verticalRate = (Math.random() - 0.5) * 2000;
     aircraft.push({
@@ -40,18 +43,17 @@ function generateMockData(bounds: ViewportBounds | null, count: number = 50) {
   return aircraft;
 }
 
-// Debug supersonic aircraft - always visible for testing prediction
 function createSupersonicDebugAircraft() {
   return {
     id: 'debug_supersonic_sr71',
     callsign: 'SR71DBG',
     type: 'SR-71',
     position: {
-      latitude: 40.7128, // New York
+      latitude: 40.7128,
       longitude: -74.006,
-      altitude: 85000, // 85,000 ft - SR-71 cruise altitude
-      heading: 45, // Northeast
-      speed: 1900, // ~Mach 3
+      altitude: 85000,
+      heading: 45,
+      speed: 1900,
       verticalRate: 0,
       geoAltitude: 85000,
     },
@@ -64,18 +66,20 @@ function createSupersonicDebugAircraft() {
   };
 }
 
-// Normalize longitude to -180 to 180 range
+// ============================================================================
+// HELPERS
+// ============================================================================
+
 function normalizeLon(lon: number): number {
   while (lon > 180) lon -= 360;
   while (lon < -180) lon += 360;
   return lon;
 }
 
-// Parse OpenSky state vector into Aircraft object
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function parseStateVector(s: any[]): Aircraft | null {
   if (s[5] == null || s[6] == null) return null;
-  
+
   return {
     id: s[0],
     callsign: (s[1] || '').trim() || 'N/A',
@@ -83,10 +87,10 @@ function parseStateVector(s: any[]): Aircraft | null {
     position: {
       longitude: s[5],
       latitude: s[6],
-      altitude: (s[7] || 0) * 3.28084, // m to ft
+      altitude: (s[7] || 0) * 3.28084,
       heading: s[10] || 0,
-      speed: (s[9] || 0) * 1.94384, // m/s to kts
-      verticalRate: (s[11] || 0) * 196.850, // m/s to ft/min
+      speed: (s[9] || 0) * 1.94384,
+      verticalRate: (s[11] || 0) * 196.850,
       geoAltitude: (s[13] || 0) * 3.28084,
     },
     timestamp: Date.now(),
@@ -99,61 +103,169 @@ function parseStateVector(s: any[]): Aircraft | null {
   };
 }
 
+// ============================================================================
+// VIEWPORT-BASED LAZY LOADING HELPERS
+// ============================================================================
+
+interface LoadedRegion {
+  minLat: number;
+  maxLat: number;
+  minLon: number;
+  maxLon: number;
+  fetchedAt: number;
+}
+
+// Check if loaded region covers enough of the current viewport
+function isViewportCovered(
+  viewport: ViewportBounds,
+  region: LoadedRegion,
+  threshold: number
+): boolean {
+  const vArea = (viewport.maxLat - viewport.minLat) * (viewport.maxLon - viewport.minLon);
+  if (vArea <= 0) return true;
+
+  const oMinLat = Math.max(viewport.minLat, region.minLat);
+  const oMaxLat = Math.min(viewport.maxLat, region.maxLat);
+  const oMinLon = Math.max(viewport.minLon, region.minLon);
+  const oMaxLon = Math.min(viewport.maxLon, region.maxLon);
+
+  if (oMinLat >= oMaxLat || oMinLon >= oMaxLon) return false;
+
+  const oArea = (oMaxLat - oMinLat) * (oMaxLon - oMinLon);
+  return (oArea / vArea) >= threshold;
+}
+
+// Add padding around bounds for prefetching nearby areas
+function padBounds(bounds: ViewportBounds, factor: number): ViewportBounds {
+  const latSpan = bounds.maxLat - bounds.minLat;
+  const lonSpan = bounds.maxLon - bounds.minLon;
+  const latPad = latSpan * (factor - 1) / 2;
+  const lonPad = lonSpan * (factor - 1) / 2;
+
+  return {
+    ...bounds,
+    minLat: Math.max(-90, bounds.minLat - latPad),
+    maxLat: Math.min(90, bounds.maxLat + latPad),
+    minLon: bounds.minLon - lonPad,
+    maxLon: bounds.maxLon + lonPad,
+  };
+}
+
+// Check if a position falls within bounds (with optional margin)
+function isInBounds(lat: number, lon: number, bounds: ViewportBounds, margin: number = 0): boolean {
+  return (
+    lat >= bounds.minLat - margin &&
+    lat <= bounds.maxLat + margin &&
+    lon >= bounds.minLon - margin &&
+    lon <= bounds.maxLon + margin
+  );
+}
+
+// ============================================================================
+// DATA POLLER - VIEWPORT-BASED LAZY LOADING
+// ============================================================================
+
 export function DataPoller() {
   const isPolling = useRadarStore((state) => state.isPolling);
   const setAircraft = useRadarStore((state) => state.setAircraft);
-  const aircraft = useRadarStore((state) => state.aircraft);
   const viewportBounds = useRadarStore((state) => state.viewportBounds);
   const locationReady = useRadarStore((state) => state.locationReady);
-  
+
   const hasInitialized = useRef(false);
-  const lastFetchBounds = useRef<string>('');
   const fetchController = useRef<AbortController | null>(null);
-  const lastFetchTime = useRef(0);
   const consecutiveErrors = useRef(0);
-  
-  // Keep cache in sync with store (for when aircraft are deloaded)
-  const cachedAircraft = useRef<Map<string, Aircraft>>(new Map());
-  useEffect(() => {
-    // Sync cache with current store state
-    const currentIds = new Set(aircraft.map(a => a.id));
-    cachedAircraft.current.forEach((_, id) => {
-      if (!currentIds.has(id)) {
-        cachedAircraft.current.delete(id);
+
+  // Spatial aircraft cache - persists across viewport changes
+  const aircraftCache = useRef<Map<string, { aircraft: Aircraft; fetchedAt: number }>>(new Map());
+
+  // The padded region we last successfully fetched
+  const loadedRegion = useRef<LoadedRegion | null>(null);
+
+  // Get visible aircraft from cache for given viewport bounds
+  const getVisibleFromCache = useCallback((bounds: ViewportBounds): Aircraft[] => {
+    const visible: Aircraft[] = [];
+    const margin = 5; // Degrees - generous margin for rendering edge-fading
+
+    aircraftCache.current.forEach(({ aircraft }) => {
+      if (isInBounds(aircraft.position.latitude, aircraft.position.longitude, bounds, margin)) {
+        visible.push(aircraft);
       }
     });
-    // Update cache with current aircraft data
-    aircraft.forEach(ac => {
-      cachedAircraft.current.set(ac.id, ac);
-    });
-  }, [aircraft]);
-  
-  const fetchData = useCallback(async (bounds: ViewportBounds | null) => {
-    // Don't fetch until location and viewport are ready
+
+    // Always keep selected aircraft even if out of viewport
+    const selectedEntity = useRadarStore.getState().gameState.selectedEntity;
+    const selectedId = selectedEntity?.type === 'aircraft' ? selectedEntity.id : null;
+    if (selectedId) {
+      const cached = aircraftCache.current.get(selectedId);
+      if (cached && !visible.find(a => a.id === selectedId)) {
+        visible.push(cached.aircraft);
+      }
+    }
+
+    // Always add debug aircraft
+    const debugAircraft = createSupersonicDebugAircraft();
+    if (!visible.find(a => a.id === debugAircraft.id)) {
+      visible.push(debugAircraft);
+    }
+
+    return visible;
+  }, []);
+
+  // Update store with visible aircraft from cache
+  const updateDisplay = useCallback((bounds: ViewportBounds) => {
+    const visible = getVisibleFromCache(bounds);
+    if (visible.length > 0) {
+      setAircraft(visible);
+    }
+  }, [getVisibleFromCache, setAircraft]);
+
+  // Main fetch function with lazy loading logic
+  const fetchData = useCallback(async (bounds: ViewportBounds, force: boolean = false) => {
     if (!isPolling || !bounds) return;
-    
+
+    // Don't fetch when zoomed too far out (would return excessive data)
+    if (bounds.zoomLevel > POLLING.MAX_FETCH_ZOOM) {
+      console.log('[DataPoller] Zoomed too far out, showing cached data');
+      if (aircraftCache.current.size > 0) {
+        updateDisplay(bounds);
+      }
+      return;
+    }
+
+    // Check if viewport is still covered by the loaded region
+    if (!force && loadedRegion.current) {
+      const age = Date.now() - loadedRegion.current.fetchedAt;
+      if (age < POLLING.AIRCRAFT_CACHE_TTL &&
+          isViewportCovered(bounds, loadedRegion.current, POLLING.COVERAGE_THRESHOLD)) {
+        // Region is fresh and covers viewport - just refresh display from cache
+        updateDisplay(bounds);
+        return;
+      }
+    }
+
     // Cancel any in-flight request
     if (fetchController.current) {
       fetchController.current.abort();
     }
     fetchController.current = new AbortController();
-    
+
+    // Pad bounds for prefetching nearby areas
+    const padded = padBounds(bounds, POLLING.VIEWPORT_PADDING_FACTOR);
+
     try {
-      // Build URL with bounding box - always required now
-      const lamin = Math.max(-90, bounds.minLat);
-      const lamax = Math.min(90, bounds.maxLat);
-      const lomin = normalizeLon(bounds.minLon);
-      const lomax = normalizeLon(bounds.maxLon);
-      
-      // Use our internal API route which handles auth and rate limiting
+      const lamin = Math.max(-90, padded.minLat);
+      const lamax = Math.min(90, padded.maxLat);
+      const lomin = normalizeLon(padded.minLon);
+      const lomax = normalizeLon(padded.maxLon);
+
       const url = `/api/aircraft?lamin=${lamin.toFixed(2)}&lamax=${lamax.toFixed(2)}&lomin=${lomin.toFixed(2)}&lomax=${lomax.toFixed(2)}`;
-      
-      console.log('[DataPoller] Fetching via API route...');
-      
+
+      console.log('[DataPoller] Fetching padded viewport...');
+
       const res = await fetch(url, {
         signal: fetchController.current.signal,
       });
-      
+
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
         if (res.status === 429) {
@@ -164,119 +276,108 @@ export function DataPoller() {
         }
         throw new Error(errorData.message || `API error: ${res.status}`);
       }
-      
+
       const data = await res.json();
-      consecutiveErrors.current = 0; // Reset on success
-      lastFetchTime.current = Date.now();
-      
+      consecutiveErrors.current = 0;
+
+      const now = Date.now();
       console.log('[DataPoller] Received', data.states?.length || 0, 'aircraft');
-      
+
       if (data.states && data.states.length > 0) {
-        const newAircraft = new Map<string, Aircraft>();
-        
-        // Parse all aircraft from API
+        // Merge new aircraft into cache (update existing, add new)
         for (const state of data.states) {
           const ac = parseStateVector(state);
           if (ac) {
-            newAircraft.set(ac.id, ac);
+            aircraftCache.current.set(ac.id, { aircraft: ac, fetchedAt: now });
           }
         }
-        
-        // Merge with cached aircraft for smooth transitions
-        // Keep selected aircraft even if out of bounds
-        const mergedAircraft = new Map<string, Aircraft>();
-        
-        // Add new aircraft
-        newAircraft.forEach((ac, id) => {
-          mergedAircraft.set(id, ac);
-        });
-        
-        // Get the CURRENT selected aircraft from store (not stale closure value)
-        // This fixes the bug where selecting an aircraft during a fetch would lose it
-        const currentSelectedEntity = useRadarStore.getState().gameState.selectedEntity;
-        const currentSelectedAircraft = currentSelectedEntity?.type === 'aircraft' ? currentSelectedEntity.id : null;
-        
-        // Keep selected aircraft from cache if not in new data
-        if (currentSelectedAircraft && cachedAircraft.current.has(currentSelectedAircraft) && !newAircraft.has(currentSelectedAircraft)) {
-          mergedAircraft.set(currentSelectedAircraft, cachedAircraft.current.get(currentSelectedAircraft)!);
-        }
-        
-        // Update cache
-        cachedAircraft.current = mergedAircraft;
-        
-        // Convert to array for store, add debug supersonic aircraft
-        const aircraftArray = Array.from(mergedAircraft.values());
-        
-        // Always add supersonic debug aircraft
-        const debugAircraft = createSupersonicDebugAircraft();
-        const existingDebugIdx = aircraftArray.findIndex(a => a.id === debugAircraft.id);
-        if (existingDebugIdx === -1) {
-          aircraftArray.push(debugAircraft);
-        }
-        
-        if (aircraftArray.length > 0) {
-          setAircraft(aircraftArray);
-          return;
-        }
+
+        // Update loaded region to the padded fetch area
+        loadedRegion.current = {
+          minLat: padded.minLat,
+          maxLat: padded.maxLat,
+          minLon: padded.minLon,
+          maxLon: padded.maxLon,
+          fetchedAt: now,
+        };
+
+        // Update store with visible aircraft from cache
+        updateDisplay(bounds);
+        return;
       }
       throw new Error('No data');
-    } catch (e: any) {
-      if (e.name === 'AbortError') return; // Ignore aborted requests
-      
-      console.warn('[DataPoller] API failed:', e.message);
-      // Only use mock data if we have absolutely no data yet
-      // Once we have any data (real or mock), don't replace it on API failure
-      if (aircraft.length === 0) {
-        console.log('[DataPoller] No data available, using mock data as fallback');
+    } catch (e: unknown) {
+      const error = e as Error;
+      if (error.name === 'AbortError') return;
+
+      console.warn('[DataPoller] API failed:', error.message);
+      // Fall back to cache or mock data
+      if (aircraftCache.current.size > 0) {
+        updateDisplay(bounds);
+      } else {
         const mockData = generateMockData(bounds);
         mockData.push(createSupersonicDebugAircraft());
         setAircraft(mockData);
-      } else {
-        console.log('[DataPoller] Keeping existing', aircraft.length, 'aircraft');
       }
     }
-  }, [isPolling, setAircraft, aircraft.length]);
-  
-  // Initial fetch - only when location is ready and we have viewport bounds
+  }, [isPolling, setAircraft, updateDisplay]);
+
+  // Initial fetch - when location and viewport are ready
   useEffect(() => {
     if (!hasInitialized.current && locationReady && viewportBounds) {
       hasInitialized.current = true;
-      fetchData(viewportBounds);
+      fetchData(viewportBounds, true);
     }
   }, [fetchData, viewportBounds, locationReady]);
-  
-  // Fetch when viewport changes significantly
+
+  // Handle viewport changes - debounced fetch/display check
   useEffect(() => {
     if (!viewportBounds || !isPolling || !locationReady) return;
-    
-    // Create a key for current bounds (rounded to reduce fetches)
-    const boundsKey = `${Math.round(viewportBounds.centerLat / 5) * 5},${Math.round(viewportBounds.centerLon / 5) * 5},${viewportBounds.zoomLevel.toFixed(1)}`;
-    
-    if (boundsKey !== lastFetchBounds.current) {
-      lastFetchBounds.current = boundsKey;
-      // Debounce viewport changes
-      const timeout = setTimeout(() => {
-        fetchData(viewportBounds);
-      }, 300);
-      return () => clearTimeout(timeout);
-    }
+
+    const timeout = setTimeout(() => {
+      fetchData(viewportBounds);
+    }, POLLING.DEBOUNCE_VIEWPORT_CHANGE);
+    return () => clearTimeout(timeout);
   }, [viewportBounds, isPolling, fetchData, locationReady]);
-  
-  // Regular polling interval - only when location is ready
-  // Use longer intervals to stay well under rate limits
+
+  // Regular polling - force refresh current viewport data
   useEffect(() => {
     if (!isPolling || !locationReady || !viewportBounds) return;
-    
-    // Increase interval based on consecutive errors (exponential backoff)
+
     const baseInterval = POLLING.BASE_INTERVAL;
-    const backoffMultiplier = Math.min(Math.pow(2, consecutiveErrors.current), POLLING.MAX_BACKOFF_MULTIPLIER);
+    const backoffMultiplier = Math.min(
+      Math.pow(2, consecutiveErrors.current),
+      POLLING.MAX_BACKOFF_MULTIPLIER
+    );
     const interval = baseInterval * backoffMultiplier;
-    
+
     console.log(`[DataPoller] Polling every ${interval / 1000}s (errors: ${consecutiveErrors.current})`);
-    
-    const timer = setInterval(() => fetchData(viewportBounds), interval);
+
+    const timer = setInterval(() => fetchData(viewportBounds, true), interval);
     return () => clearInterval(timer);
   }, [isPolling, fetchData, viewportBounds, locationReady]);
-  
+
+  // Cache cleanup - periodically remove stale aircraft far from viewport
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = Date.now();
+      const bounds = useRadarStore.getState().viewportBounds;
+      if (!bounds) return;
+
+      let removed = 0;
+      aircraftCache.current.forEach(({ fetchedAt, aircraft }, id) => {
+        if (now - fetchedAt > POLLING.AIRCRAFT_CACHE_TTL &&
+            !isInBounds(aircraft.position.latitude, aircraft.position.longitude, bounds, 15)) {
+          aircraftCache.current.delete(id);
+          removed++;
+        }
+      });
+      if (removed > 0) {
+        console.log(`[DataPoller] Cache cleanup: removed ${removed} stale aircraft`);
+      }
+    }, POLLING.CACHE_CLEANUP_INTERVAL);
+    return () => clearInterval(timer);
+  }, []);
+
   return null;
 }

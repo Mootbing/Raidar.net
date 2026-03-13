@@ -8,8 +8,15 @@ import { AircraftLayerInstanced } from './AircraftLayerInstanced';
 import { AirportsLayer } from './AirportsLayer';
 import { CameraController } from './CameraController';
 import { ViewportTracker } from './ViewportTracker';
+import { MaritimeLayer } from './layers/MaritimeLayer';
+import { SatelliteLayer } from './layers/SatelliteLayer';
+import { DocksLayer } from './layers/DocksLayer';
+import { BorderHighlightLayer } from './layers/BorderHighlightLayer';
+import { NewsLayer } from './layers/NewsLayer';
 import { Suspense } from 'react';
 import { COLORS, CAMERA } from '@/config/constants';
+import { useRadarStore } from '@/store/gameStore';
+import { LayerId } from '@/types/layers';
 
 function LoadingFallback() {
   return (
@@ -18,6 +25,16 @@ function LoadingFallback() {
       <meshBasicMaterial color={COLORS.GLOBE_SURFACE} wireframe />
     </mesh>
   );
+}
+
+/**
+ * Renders children only when the given layer is enabled.
+ * Entities inside each layer self-manage viewport visibility via useLayerData.
+ */
+function Layer({ id, children }: { id: LayerId; children: React.ReactNode }) {
+  const enabled = useRadarStore((s) => s.layers[id]?.enabled);
+  if (!enabled) return null;
+  return <>{children}</>;
 }
 
 export function Scene() {
@@ -34,10 +51,32 @@ export function Scene() {
         <AdaptiveDpr pixelated />
         <Stars radius={100} depth={50} count={2000} factor={3} saturation={0} fade speed={0.2} />
         <Suspense fallback={<LoadingFallback />}>
+          {/* Base layers */}
           <Globe />
           <CountryBorders />
+          <Layer id="border_highlight">
+            <BorderHighlightLayer />
+          </Layer>
+
+          {/* Infrastructure layers */}
           <AirportsLayer />
+          <Layer id="docks">
+            <DocksLayer />
+          </Layer>
+
+          {/* Traffic layers — entities only render in viewport via useLayerData */}
           <AircraftLayerInstanced />
+          <Layer id="maritime">
+            <MaritimeLayer />
+          </Layer>
+          <Layer id="satellites">
+            <SatelliteLayer />
+          </Layer>
+
+          {/* Intel layers */}
+          <Layer id="news">
+            <NewsLayer />
+          </Layer>
         </Suspense>
         <CameraController />
         <ViewportTracker />

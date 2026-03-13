@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { EntityRef } from '@/types/entities';
 import { UI } from '@/config/constants';
+import { LayerId, LayerState, getInitialLayerStates } from '@/types/layers';
 
 // ============================================================================
 // DATA INTERFACES
@@ -91,7 +92,7 @@ interface GameState {
   selectedEntity: EntityRef | null;
   focusLocation: FocusLocation | null;
   restoreCameraFlag: number; // Increment to trigger camera restore
-  activeMode: 'all' | 'aircraft' | 'airport' | 'missile';
+  activeMode: 'all' | 'aircraft' | 'airport' | 'missile' | 'ship' | 'satellite' | 'dock';
   snapMode: boolean; // Snap mode for arrow key entity navigation
   viewMode: ViewMode; // Current view mode for selected aircraft
   isPlaying: boolean;
@@ -132,7 +133,7 @@ interface Store {
   selectEntity: (ref: EntityRef | null) => void;
   setFocusLocation: (loc: FocusLocation | null) => void;
   restoreCamera: () => void;
-  setActiveMode: (mode: 'all' | 'aircraft' | 'airport' | 'missile') => void;
+  setActiveMode: (mode: GameState['activeMode']) => void;
   toggleSnapMode: () => void;
   setViewMode: (mode: ViewMode) => void;
   cycleViewMode: (direction: 'next' | 'prev') => void;
@@ -166,13 +167,26 @@ interface Store {
   // Intro animation phases: 'loading' -> 'borders' -> 'airports' -> 'aircraft' -> 'complete'
   introPhase: 'loading' | 'borders' | 'airports' | 'aircraft' | 'complete';
   setIntroPhase: (phase: 'loading' | 'borders' | 'airports' | 'aircraft' | 'complete') => void;
-  
+
   // Loading progress (0-100) for syncing animations
   loadingProgress: number;
   setLoadingProgress: (progress: number) => void;
+
+  // Layer management
+  layers: Record<LayerId, LayerState>;
+  toggleLayer: (id: LayerId) => void;
+  setLayerEnabled: (id: LayerId, enabled: boolean) => void;
+  setLayerState: (id: LayerId, state: Partial<LayerState>) => void;
+  isLayerEnabled: (id: LayerId) => boolean;
+
+  // Generic layer entity storage (for layers that don't have dedicated arrays)
+  layerEntities: Record<string, any[]>; // eslint-disable-line @typescript-eslint/no-explicit-any
+  setLayerEntities: (layerId: LayerId, entities: any[]) => void; // eslint-disable-line @typescript-eslint/no-explicit-any
+  getLayerEntities: (layerId: LayerId) => any[]; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
 export type { Aircraft, Position, TrackWaypoint, FlightTrack, ViewportBounds, Airport, ViewMode };
+export type { LayerId, LayerState };
 
 // ============================================================================
 // STORE IMPLEMENTATION
@@ -310,8 +324,21 @@ export const useRadarStore = create<Store>((set, get) => ({
         return get().getAircraftById(ref.id);
       case 'airport':
         return get().getAirportById(ref.id);
-      default:
+      default: {
+        // Check generic layer entities
+        const layerMap: Record<string, string> = {
+          ship: 'maritime',
+          satellite: 'satellites',
+          dock: 'docks',
+          news_event: 'news',
+        };
+        const layerId = layerMap[ref.type];
+        if (layerId) {
+          const entities = get().layerEntities[layerId] ?? [];
+          return entities.find((e: any) => e.id === ref.id); // eslint-disable-line @typescript-eslint/no-explicit-any
+        }
         return undefined;
+      }
     }
   },
   
@@ -490,6 +517,49 @@ export const useRadarStore = create<Store>((set, get) => ({
   loadingProgress: 0,
   setLoadingProgress: (progress) => set({ loadingProgress: progress }),
   
+  // Layer management
+  layers: getInitialLayerStates(),
+
+  toggleLayer: (id) => {
+    set((s) => ({
+      layers: {
+        ...s.layers,
+        [id]: { ...s.layers[id], enabled: !s.layers[id].enabled },
+      },
+    }));
+  },
+
+  setLayerEnabled: (id, enabled) => {
+    set((s) => ({
+      layers: {
+        ...s.layers,
+        [id]: { ...s.layers[id], enabled },
+      },
+    }));
+  },
+
+  setLayerState: (id, state) => {
+    set((s) => ({
+      layers: {
+        ...s.layers,
+        [id]: { ...s.layers[id], ...state },
+      },
+    }));
+  },
+
+  isLayerEnabled: (id) => get().layers[id]?.enabled ?? false,
+
+  // Generic layer entity storage
+  layerEntities: {},
+
+  setLayerEntities: (layerId, entities) => {
+    set((s) => ({
+      layerEntities: { ...s.layerEntities, [layerId]: entities },
+    }));
+  },
+
+  getLayerEntities: (layerId) => get().layerEntities[layerId] ?? [],
+
   fetchAirports: async () => {
     const { airports, airportsLoading } = get();
     

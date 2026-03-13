@@ -211,6 +211,96 @@ const shipConfig: EntityTypeConfig = {
   getSubtitle: (e) => (e as any).flag || 'Unknown',
 };
 
+const satelliteConfig: EntityTypeConfig = {
+  displayName: 'Satellite',
+  pluralName: 'Satellites',
+  icon: '◎',
+  color: '#ff66aa',
+  searchFields: ['name', 'noradId', 'orbitType', 'operator', 'purpose'],
+  matchEntity: (entity, filters, freeText) => {
+    const sat = entity as any;
+    for (const filter of filters) {
+      const value = getFieldValue(sat, filter.field);
+      if (!matchesFilter(value, filter)) return false;
+    }
+    if (freeText.length > 0) {
+      const searchable = [sat.name, sat.noradId, sat.operator, sat.purpose, sat.orbitType]
+        .filter(Boolean).join(' ').toLowerCase();
+      if (!freeText.some(term => searchable.includes(term.toLowerCase()))) return false;
+    }
+    return true;
+  },
+  getSearchableText: (e) => {
+    const sat = e as any;
+    return [sat.name, sat.noradId, sat.operator, sat.purpose].filter(Boolean).join(' ');
+  },
+  getDisplayName: (e) => (e as any).name || 'Unknown Satellite',
+  getSubtitle: (e) => {
+    const sat = e as any;
+    return `${sat.orbitType || '?'} — ${sat.operator || 'Unknown'}`;
+  },
+};
+
+const dockConfig: EntityTypeConfig = {
+  displayName: 'Port',
+  pluralName: 'Ports',
+  icon: '⊞',
+  color: '#88ccff',
+  searchFields: ['name', 'portCode', 'country', 'portType'],
+  matchEntity: (entity, filters, freeText) => {
+    const dock = entity as any;
+    for (const filter of filters) {
+      const value = getFieldValue(dock, filter.field);
+      if (!matchesFilter(value, filter)) return false;
+    }
+    if (freeText.length > 0) {
+      const searchable = [dock.name, dock.portCode, dock.country, dock.portType]
+        .filter(Boolean).join(' ').toLowerCase();
+      if (!freeText.some(term => searchable.includes(term.toLowerCase()))) return false;
+    }
+    return true;
+  },
+  getSearchableText: (e) => {
+    const dock = e as any;
+    return [dock.name, dock.portCode, dock.country].filter(Boolean).join(' ');
+  },
+  getDisplayName: (e) => (e as any).name || 'Unknown Port',
+  getSubtitle: (e) => {
+    const dock = e as any;
+    return `${dock.portCode || '?'} — ${dock.country || 'Unknown'}`;
+  },
+};
+
+const newsEventConfig: EntityTypeConfig = {
+  displayName: 'News',
+  pluralName: 'News',
+  icon: '▣',
+  color: '#ffcc00',
+  searchFields: ['headline', 'source', 'category', 'severity'],
+  matchEntity: (entity, filters, freeText) => {
+    const news = entity as any;
+    for (const filter of filters) {
+      const value = getFieldValue(news, filter.field);
+      if (!matchesFilter(value, filter)) return false;
+    }
+    if (freeText.length > 0) {
+      const searchable = [news.headline, news.source, news.category]
+        .filter(Boolean).join(' ').toLowerCase();
+      if (!freeText.some(term => searchable.includes(term.toLowerCase()))) return false;
+    }
+    return true;
+  },
+  getSearchableText: (e) => {
+    const news = e as any;
+    return [news.headline, news.source, news.category].filter(Boolean).join(' ');
+  },
+  getDisplayName: (e) => (e as any).headline || 'News Event',
+  getSubtitle: (e) => {
+    const news = e as any;
+    return `${news.source || 'Unknown'} — ${news.severity || '?'}`;
+  },
+};
+
 const drawShapeConfig: EntityTypeConfig = {
   displayName: 'Shape',
   pluralName: 'Shapes',
@@ -234,6 +324,9 @@ export const entityRegistry: Record<EntityType, EntityTypeConfig> = {
   radar: radarConfig,
   sam_site: samSiteConfig,
   ship: shipConfig,
+  satellite: satelliteConfig,
+  dock: dockConfig,
+  news_event: newsEventConfig,
   draw_shape: drawShapeConfig,
 };
 
@@ -248,15 +341,14 @@ export function getEntityConfig(type: EntityType): EntityTypeConfig {
  * Get all entity types that are currently active (have data)
  */
 export function getActiveEntityTypes(): EntityType[] {
-  // For now, return the main types. This could be dynamic based on what data exists.
-  return ['aircraft', 'airport'];
+  return ['aircraft', 'airport', 'ship', 'satellite', 'dock', 'news_event'];
 }
 
 /**
  * Get all searchable entity types
  */
 export function getSearchableEntityTypes(): EntityType[] {
-  return ['aircraft', 'airport', 'missile'];
+  return ['aircraft', 'airport', 'missile', 'ship', 'satellite', 'dock', 'news_event'];
 }
 
 // ============================================================================

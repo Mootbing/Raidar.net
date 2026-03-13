@@ -7,13 +7,16 @@
  * All possible entity types in the system
  * Add new types here as the system expands
  */
-export type EntityType = 
-  | 'aircraft' 
-  | 'airport' 
-  | 'missile' 
-  | 'radar' 
-  | 'sam_site' 
-  | 'ship' 
+export type EntityType =
+  | 'aircraft'
+  | 'airport'
+  | 'missile'
+  | 'radar'
+  | 'sam_site'
+  | 'ship'
+  | 'satellite'
+  | 'dock'
+  | 'news_event'
   | 'draw_shape';
 
 /**
@@ -136,6 +139,51 @@ export interface ShipEntity extends MapEntity {
 }
 
 /**
+ * Satellite entity
+ */
+export interface SatelliteEntity extends MapEntity {
+  entityType: 'satellite';
+  name: string;
+  noradId: string;
+  orbitType: 'LEO' | 'MEO' | 'GEO' | 'HEO' | 'SSO';
+  purpose: string;
+  operator: string;
+  launchDate?: string;
+  speed: number; // km/s
+  inclination: number; // degrees
+  period: number; // minutes
+  trajectory?: GeoPosition[]; // Predicted ground track
+}
+
+/**
+ * Dock / Port entity
+ */
+export interface DockEntity extends MapEntity {
+  entityType: 'dock';
+  name: string;
+  portCode: string;
+  country: string;
+  portType: 'container' | 'bulk' | 'naval' | 'mixed' | 'oil_terminal';
+  capacity?: number;
+  isActive: boolean;
+  vesselCount?: number;
+}
+
+/**
+ * News event entity (geolocated news)
+ */
+export interface NewsEventEntity extends MapEntity {
+  entityType: 'news_event';
+  headline: string;
+  source: string;
+  category: 'military' | 'security' | 'maritime' | 'aviation' | 'geopolitics' | 'natural_disaster';
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  url?: string;
+  publishedAt: number;
+  expiresAt?: number;
+}
+
+/**
  * Draw shape entity (for user-drawn regions)
  */
 export interface DrawShapeEntity extends MapEntity {
@@ -155,13 +203,16 @@ export interface DrawShapeEntity extends MapEntity {
 /**
  * Union type of all entity types
  */
-export type AnyEntity = 
-  | AircraftEntity 
-  | AirportEntity 
-  | MissileEntity 
-  | RadarEntity 
-  | SamSiteEntity 
-  | ShipEntity 
+export type AnyEntity =
+  | AircraftEntity
+  | AirportEntity
+  | MissileEntity
+  | RadarEntity
+  | SamSiteEntity
+  | ShipEntity
+  | SatelliteEntity
+  | DockEntity
+  | NewsEventEntity
   | DrawShapeEntity;
 
 // ============================================================================
@@ -195,6 +246,9 @@ export function getEntityTypeName(type: EntityType): string {
     radar: 'Radar',
     sam_site: 'SAM Site',
     ship: 'Ship',
+    satellite: 'Satellite',
+    dock: 'Port',
+    news_event: 'News',
     draw_shape: 'Shape',
   };
   return names[type];
@@ -211,6 +265,9 @@ export function getEntityTypePluralName(type: EntityType): string {
     radar: 'Radars',
     sam_site: 'SAM Sites',
     ship: 'Ships',
+    satellite: 'Satellites',
+    dock: 'Ports',
+    news_event: 'News',
     draw_shape: 'Shapes',
   };
   return names[type];

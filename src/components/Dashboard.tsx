@@ -5,6 +5,7 @@ import { useEffect, useCallback, useState } from 'react';
 import { EntityInfoPanel } from './entities/EntityInfoPanel';
 import { SearchBar } from './SearchBar';
 import { StackedModeBars } from './StackedModeBars';
+import { LayerPanel } from './LayerPanel';
 import { useGlobalInput } from '@/hooks/useInputManager';
 import { InputAction } from '@/lib/inputManager';
 import { UI, COLORS } from '@/config/constants';
@@ -19,6 +20,7 @@ export function Dashboard() {
   // Delay animation start until after loading screen fades
   const [animateIn, setAnimateIn] = useState(false);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const [layerPanelOpen, setLayerPanelOpen] = useState(false);
   
   useEffect(() => {
     if (locationReady && !animateIn) {
@@ -37,7 +39,11 @@ export function Dashboard() {
   const handleGlobalAction = useCallback((action: InputAction) => {
     switch (action) {
       case 'deselect':
-        handleClosePanel();
+        if (layerPanelOpen) {
+          setLayerPanelOpen(false);
+        } else {
+          handleClosePanel();
+        }
         break;
       case 'select_hovered':
         if (gameState.hoveredEntity) {
@@ -45,12 +51,26 @@ export function Dashboard() {
         }
         break;
     }
-  }, [handleClosePanel, gameState.hoveredEntity, selectEntity]);
+  }, [handleClosePanel, gameState.hoveredEntity, selectEntity, layerPanelOpen]);
   
   useGlobalInput(handleGlobalAction);
 
   return (
     <div className="absolute inset-0 pointer-events-none font-mono">
+      {/* Layer Panel - Top Right */}
+      <div className="absolute top-4 right-4 pointer-events-auto">
+        <LayerPanel isOpen={layerPanelOpen} onClose={() => setLayerPanelOpen(false)} />
+        {!layerPanelOpen && locationReady && (
+          <button
+            onClick={() => setLayerPanelOpen(true)}
+            className={`${BG.GLASS_BLUR} ${BORDER.PANEL} px-3 py-1.5 ${TEXT.BASE} ${TEXT.MUTED} hover:text-white/80 transition-colors tracking-wider ${animateIn ? 'bottom-bar-item animate-in' : 'bottom-bar-item'}`}
+            style={{ '--item-index': 0 } as React.CSSProperties}
+          >
+            LAYERS
+          </button>
+        )}
+      </div>
+
       {/* Entity Info Panel - Bottom Left */}
       <div className="absolute bottom-14 left-4 pointer-events-auto">
         <EntityInfoPanel onClose={handleClosePanel} />
