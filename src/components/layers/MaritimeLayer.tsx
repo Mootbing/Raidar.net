@@ -1,7 +1,7 @@
 'use client';
 
-import { useRef, useEffect, useMemo, useCallback, useState } from 'react';
-import { useFrame, ThreeEvent } from '@react-three/fiber';
+import { useRef, useEffect, useMemo, useState } from 'react';
+import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
 // Flat triangle geometry for ships — long and narrow like aircraft triangles
@@ -40,6 +40,7 @@ function getShipHitboxGeometry(): THREE.BufferGeometry {
   return _shipHitboxGeometry;
 }
 import { useLayerData } from '@/hooks/useLayerData';
+import { useEntityInteraction, ensureBoundingSphere } from '@/hooks/useEntityInteraction';
 import { useRadarStore } from '@/store/gameStore';
 import { GLOBE, COLORS, DOCKS } from '@/config/constants';
 
@@ -86,10 +87,9 @@ export function MaritimeLayer() {
 
   const ships = useLayerData<Ship>('maritime');
   const setLayerEntities = useRadarStore((s) => s.setLayerEntities);
-  const selectEntity = useRadarStore((s) => s.selectEntity);
-  const hoverEntity = useRadarStore((s) => s.hoverEntity);
   const hoveredEntity = useRadarStore((s) => s.gameState.hoveredEntity);
   const selectedEntity = useRadarStore((s) => s.gameState.selectedEntity);
+  const { indexToIdRef, handlers } = useEntityInteraction('ship');
 
   const hoveredShipId = hoveredEntity?.type === 'ship' ? hoveredEntity.id : null;
   const selectedShipId = selectedEntity?.type === 'ship' ? selectedEntity.id : null;
@@ -99,8 +99,8 @@ export function MaritimeLayer() {
   const animationTime = useRef(0);
   const animationStarted = useRef(false);
 
-  // Index mapping for pointer events
-  const indexToId = useRef<string[]>([]);
+  // Alias for readability
+  const indexToId = indexToIdRef;
 
   // Pre-allocate color attribute buffers (pre-filled with default color)
   const colorArray = useMemo(() => {
@@ -172,9 +172,7 @@ export function MaritimeLayer() {
     }
 
     // Ensure hitbox bounding sphere covers globe for reliable raycasting
-    if (hitboxRef.current && !hitboxRef.current.boundingSphere) {
-      hitboxRef.current.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 2);
-    }
+    ensureBoundingSphere(hitboxRef.current);
 
     // Zoom-based scaling (same as aircraft)
     const cameraDistance = state.camera.position.length();
@@ -270,31 +268,6 @@ export function MaritimeLayer() {
     }
   });
 
-  // Pointer event handlers
-  const handlePointerOver = useCallback(
-    (e: ThreeEvent<PointerEvent>) => {
-      e.stopPropagation();
-      if (e.instanceId !== undefined && indexToId.current[e.instanceId]) {
-        hoverEntity({ type: 'ship', id: indexToId.current[e.instanceId] });
-      }
-    },
-    [hoverEntity]
-  );
-
-  const handlePointerOut = useCallback(() => {
-    hoverEntity(null);
-  }, [hoverEntity]);
-
-  const handleClick = useCallback(
-    (e: ThreeEvent<MouseEvent>) => {
-      e.stopPropagation();
-      if (e.instanceId !== undefined && indexToId.current[e.instanceId]) {
-        selectEntity({ type: 'ship', id: indexToId.current[e.instanceId] });
-      }
-    },
-    [selectEntity]
-  );
-
   const shipGeo = useMemo(() => getShipGeometry(), []);
   const hitboxGeo = useMemo(() => getShipHitboxGeometry(), []);
 
@@ -306,9 +279,7 @@ export function MaritimeLayer() {
       <instancedMesh
         ref={hitboxRef}
         args={[hitboxGeo, undefined, MAX_INSTANCES]}
-        onPointerOver={handlePointerOver}
-        onPointerOut={handlePointerOut}
-        onClick={handleClick}
+        {...handlers}
         frustumCulled={false}
       >
         <meshBasicMaterial

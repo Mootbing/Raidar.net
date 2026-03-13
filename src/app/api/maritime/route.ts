@@ -7,7 +7,7 @@ import { sql } from 'drizzle-orm';
  * Maritime Traffic API
  *
  * Serves real AIS vessel data from Neon Postgres (populated by the fetcher
- * from Digitraffic.fi open AIS feed).
+ * via AISStream.io global AIS WebSocket feed).
  *
  * Query params: lamin, lamax, lomin, lomax (viewport bounds)
  * Returns: { vessels: ShipEntity[] }
@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
       draught: r.draught ?? undefined,
     }));
 
-    return NextResponse.json({ vessels, source: 'digitraffic' });
+    return NextResponse.json({ vessels, source: 'aisstream' });
   } catch (error) {
     console.error('[Maritime API] Error querying vessel data:', error);
     return NextResponse.json(

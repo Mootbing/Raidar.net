@@ -136,14 +136,14 @@ function LoadingOverlay() {
           <div className="relative inline-block text-sm tracking-[0.25em] font-light">
             {/* Grey background text */}
             <span className={`${TEXT.DARK} whitespace-nowrap`}>
-              RAIDAR OBSERVABILITY NETWORK
+              RAIDAR NETWORKS
             </span>
             {/* White overlay that reveals left to right */}
             <div
               className={`absolute top-0 left-0 ${TEXT.PRIMARY} overflow-hidden whitespace-nowrap`}
               style={{ width: `${displayProgress}%` }}
             >
-              RAIDAR OBSERVABILITY NETWORK
+              RAIDAR NETWORKS
             </div>
           </div>
         </div>

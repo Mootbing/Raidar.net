@@ -1,8 +1,8 @@
-# RAIDAR OBSERVABILITY NETWORK
+# RAIDAR NETWORKS
 
 Open source aerosystem defence engine with commercial airlines as interface example. Built with Next.js, React Three Fiber, and the OpenSky Network API.
 
-![Raidar Observability Network](https://img.shields.io/badge/version-0.1.0-blue)
+![Raidar Networks](https://img.shields.io/badge/version-0.1.0-blue)
 ![Next.js](https://img.shields.io/badge/Next.js-15-black)
 ![Three.js](https://img.shields.io/badge/Three.js-r170-green)
 

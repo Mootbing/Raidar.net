@@ -1,6 +1,6 @@
 # Orchestrator Docs
 
-Implementation guides for each data layer in the Raidar Observability Network defense platform.
+Implementation guides for each data layer in the Raidar Networks defense platform.
 
 ## Architecture
 

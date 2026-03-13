@@ -1,9 +1,10 @@
 'use client';
 
-import { useRef, useEffect, useCallback } from 'react';
-import { useFrame, ThreeEvent } from '@react-three/fiber';
+import { useRef, useEffect } from 'react';
+import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useLayerData } from '@/hooks/useLayerData';
+import { useEntityInteraction } from '@/hooks/useEntityInteraction';
 import { useRadarStore } from '@/store/gameStore';
 import { GLOBE, COLORS } from '@/config/constants';
 
@@ -38,42 +39,12 @@ export function NewsLayer() {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const events = useLayerData<NewsEvent>('news');
   const setLayerEntities = useRadarStore((s) => s.setLayerEntities);
-  const hoverEntity = useRadarStore((s) => s.hoverEntity);
-  const selectEntity = useRadarStore((s) => s.selectEntity);
-
-  // Map instance index -> event id
-  const indexToId = useRef<string[]>([]);
+  const { indexToIdRef, handlers } = useEntityInteraction('news_event');
 
   useEffect(() => {
     setLayerEntities('news', events);
-    indexToId.current = events.map((e) => e.id);
-  }, [events, setLayerEntities]);
-
-  // Pointer interaction via raycasting
-  const handlePointerOver = useCallback(
-    (e: ThreeEvent<PointerEvent>) => {
-      e.stopPropagation();
-      if (e.instanceId !== undefined && indexToId.current[e.instanceId]) {
-        hoverEntity({ type: 'news_event', id: indexToId.current[e.instanceId] });
-      }
-    },
-    [hoverEntity]
-  );
-
-  const handlePointerOut = useCallback((e: ThreeEvent<PointerEvent>) => {
-    e.stopPropagation();
-    hoverEntity(null);
-  }, [hoverEntity]);
-
-  const handleClick = useCallback(
-    (e: ThreeEvent<MouseEvent>) => {
-      e.stopPropagation();
-      if (e.instanceId !== undefined && indexToId.current[e.instanceId]) {
-        selectEntity({ type: 'news_event', id: indexToId.current[e.instanceId] });
-      }
-    },
-    [selectEntity]
-  );
+    indexToIdRef.current = events.map((e) => e.id);
+  }, [events, setLayerEntities, indexToIdRef]);
 
   useFrame(({ clock }) => {
     if (!meshRef.current || events.length === 0) return;
@@ -117,9 +88,7 @@ export function NewsLayer() {
       ref={meshRef}
       args={[undefined, undefined, 500]}
       frustumCulled={false}
-      onPointerOver={handlePointerOver}
-      onPointerOut={handlePointerOut}
-      onClick={handleClick}
+      {...handlers}
     >
       <circleGeometry args={[0.005, 8]} />
       <meshBasicMaterial

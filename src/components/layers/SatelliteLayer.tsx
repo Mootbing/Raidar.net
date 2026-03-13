@@ -1,11 +1,12 @@
 'use client';
 
-import { useRef, useEffect, useMemo, useCallback } from 'react';
-import { useFrame, ThreeEvent } from '@react-three/fiber';
+import { useRef, useEffect, useMemo } from 'react';
+import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import * as satellite from 'satellite.js';
 import { useLayerData } from '@/hooks/useLayerData';
+import { useEntityInteraction, ensureBoundingSphere } from '@/hooks/useEntityInteraction';
 import { useRadarStore } from '@/store/gameStore';
 import { GLOBE, COLORS, DOCKS } from '@/config/constants';
 
@@ -60,15 +61,13 @@ const SATELLITE_COLOR = COLORS.SATELLITE_DEFAULT;
 const SATELLITE_HOVER_COLOR = COLORS.SATELLITE_HOVERED;
 const SATELLITE_SELECTED_COLOR = COLORS.SATELLITE_SELECTED;
 
-/** Two overlapping rectangles rotated 45° to form a star/cross shape */
+/** Two overlapping squares, one rotated 45°, forming an 8-pointed star */
 function createSatelliteStarGeometry(size: number): THREE.BufferGeometry {
-  const w = size;
-  const h = size * 2.5;
-  const rect1 = new THREE.PlaneGeometry(w, h);
-  const rect2 = new THREE.PlaneGeometry(w, h);
-  rect2.rotateZ(Math.PI / 4);
-  rect1.rotateZ(-Math.PI / 4);
-  return mergeGeometries([rect1, rect2])!;
+  const s = size * 1.8;
+  const sq1 = new THREE.PlaneGeometry(s, s);
+  const sq2 = new THREE.PlaneGeometry(s, s);
+  sq2.rotateZ(Math.PI / 4);
+  return mergeGeometries([sq1, sq2])!;
 }
 
 /** Classify orbit type from altitude (km) */
@@ -94,11 +93,10 @@ export function SatelliteLayer() {
   const starGeometry = useMemo(() => createSatelliteStarGeometry(SATELLITE_SIZE), []);
   const rawSatellites = useLayerData<RawSatellite>('satellites');
   const setLayerEntities = useRadarStore((s) => s.setLayerEntities);
-  const hoverEntity = useRadarStore((s) => s.hoverEntity);
-  const selectEntity = useRadarStore((s) => s.selectEntity);
   const hoveredEntity = useRadarStore((s) => s.gameState.hoveredEntity);
   const selectedEntity = useRadarStore((s) => s.gameState.selectedEntity);
   const introPhase = useRadarStore((s) => s.introPhase);
+  const { indexToIdRef, handlers } = useEntityInteraction('satellite');
 
   // Sweep animation state
   const satAnimationTime = useRef(0);
@@ -130,41 +128,20 @@ export function SatelliteLayer() {
   const propagatedRef = useRef<PropagatedSatellite[]>([]);
   const materialNeedsRecompile = useRef(true);
 
-  // Index-to-ID mapping for hitbox events
-  const indexToIdRef = useRef<string[]>([]);
-
   // Update layer entities in store for search/selection
-  const updateStoreEntities = useCallback(() => {
+  const updateStoreEntities = useRef(() => {
     setLayerEntities('satellites', propagatedRef.current);
-  }, [setLayerEntities]);
-
-  // Pointer event handlers (R3F events on hitbox mesh)
-  const handlePointerOver = useCallback((e: ThreeEvent<PointerEvent>) => {
-    e.stopPropagation();
-    if (e.instanceId !== undefined && e.instanceId < indexToIdRef.current.length) {
-      hoverEntity({ type: 'satellite', id: indexToIdRef.current[e.instanceId] });
-    }
-  }, [hoverEntity]);
-
-  const handlePointerOut = useCallback(() => {
-    hoverEntity(null);
-  }, [hoverEntity]);
-
-  const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
-    e.stopPropagation();
-    if (e.instanceId !== undefined && e.instanceId < indexToIdRef.current.length) {
-      selectEntity({ type: 'satellite', id: indexToIdRef.current[e.instanceId] });
-    }
-  }, [selectEntity]);
+  });
+  updateStoreEntities.current = () => {
+    setLayerEntities('satellites', propagatedRef.current);
+  };
 
   // Propagate all satellites and render per frame
   useFrame((_, delta) => {
     if (!meshRef.current || satRecords.length === 0) return;
 
     // Ensure hitbox bounding sphere covers orbital range for reliable raycasting
-    if (hitboxRef.current && !hitboxRef.current.boundingSphere) {
-      hitboxRef.current.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), GLOBE.SATELLITE_MAX_ALTITUDE + 0.1);
-    }
+    ensureBoundingSphere(hitboxRef.current, 2);
 
     // Start sweep animation when satellites phase begins
     // If intro is already complete (re-toggle), skip animation entirely
@@ -319,7 +296,7 @@ export function SatelliteLayer() {
       hitboxRef.current.instanceMatrix.needsUpdate = true;
     }
 
-    // Update propagated reference for entity lookups
+    // Update propagated reference and index mapping for entity lookups
     propagatedRef.current = propagated;
     indexToIdRef.current = ids;
   });
@@ -327,11 +304,11 @@ export function SatelliteLayer() {
   // Periodically sync propagated data to store (not every frame — every 2s)
   useEffect(() => {
     const interval = setInterval(() => {
-      updateStoreEntities();
+      updateStoreEntities.current();
     }, 2000);
-    updateStoreEntities();
+    updateStoreEntities.current();
     return () => clearInterval(interval);
-  }, [updateStoreEntities]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <group>
@@ -339,9 +316,7 @@ export function SatelliteLayer() {
       <instancedMesh
         ref={hitboxRef}
         args={[undefined, undefined, MAX_SATELLITE_INSTANCES]}
-        onPointerOver={handlePointerOver}
-        onPointerOut={handlePointerOut}
-        onClick={handleClick}
+        {...handlers}
         frustumCulled={false}
       >
         <sphereGeometry args={[SATELLITE_HITBOX_SIZE, 6, 4]} />

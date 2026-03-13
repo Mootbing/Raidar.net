@@ -1,9 +1,10 @@
 'use client';
 
 import { useRef, useEffect, useMemo } from 'react';
-import { useFrame, useThree, ThreeEvent } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useLayerData } from '@/hooks/useLayerData';
+import { useEntityInteraction } from '@/hooks/useEntityInteraction';
 import { useRadarStore } from '@/store/gameStore';
 import { GLOBE, DOCKS, COLORS } from '@/config/constants';
 import { calculateViewVisibility } from '@/utils/lod';
@@ -87,11 +88,10 @@ export function DocksLayer() {
   const { camera } = useThree();
   const docks = useLayerData<Dock>('docks');
   const setLayerEntities = useRadarStore((s) => s.setLayerEntities);
-  const hoverEntity = useRadarStore((s) => s.hoverEntity);
-  const selectEntity = useRadarStore((s) => s.selectEntity);
   const hoveredEntity = useRadarStore((s) => s.gameState.hoveredEntity);
   const hoveredDock = hoveredEntity?.type === 'dock' ? hoveredEntity.id : null;
   const introPhase = useRadarStore((s) => s.introPhase);
+  const { indexToIdRef, handlers } = useEntityInteraction('dock');
 
   // Pre-allocated objects for render loop
   const allocs = useRef(createRenderLoopAllocations());
@@ -129,8 +129,12 @@ export function DocksLayer() {
     return delays;
   }, [docks]);
 
-  // Index lookup for hover/click
-  const indexToId = useMemo(() => docks.map(d => d.id), [docks]);
+  // Sync index mapping for hover/click
+  const indexToId = useMemo(() => {
+    const ids = docks.map(d => d.id);
+    indexToIdRef.current = ids;
+    return ids;
+  }, [docks, indexToIdRef]);
 
   // Initialize opacity array
   useEffect(() => {
@@ -236,32 +240,13 @@ export function DocksLayer() {
     meshRef.current.visible = maxProgress > 0.01;
   });
 
-  // Pointer handlers
-  const handlePointerOver = (e: ThreeEvent<PointerEvent>) => {
-    e.stopPropagation();
-    if (e.instanceId !== undefined && indexToId[e.instanceId]) {
-      hoverEntity({ type: 'dock', id: indexToId[e.instanceId] });
-    }
-  };
-
-  const handlePointerOut = () => hoverEntity(null);
-
-  const handleClick = (e: ThreeEvent<MouseEvent>) => {
-    e.stopPropagation();
-    if (e.instanceId !== undefined && indexToId[e.instanceId]) {
-      selectEntity({ type: 'dock', id: indexToId[e.instanceId] });
-    }
-  };
-
   if (docks.length === 0) return null;
 
   return (
     <instancedMesh
       ref={meshRef}
       args={[undefined, undefined, docks.length]}
-      onPointerOver={handlePointerOver}
-      onPointerOut={handlePointerOut}
-      onClick={handleClick}
+      {...handlers}
     >
       <circleGeometry args={[DOCKS.MARKER_SIZE, 3]} />
       <meshBasicMaterial

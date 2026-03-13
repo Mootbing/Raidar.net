@@ -1,27 +1,28 @@
+import WebSocket from 'ws';
 import { getDb } from '../db/client';
 import { vesselPositions, fetcherState } from '../db/schema';
 import { sql } from 'drizzle-orm';
 
 // ============================================================================
-// DIGITRAFFIC.FI AIS FETCH
-// Free, open AIS data from Finnish Transport Infrastructure Agency.
-// Provides real-time vessel positions + metadata for Baltic/Nordic waters.
-// No API key required. CC 4.0 BY license.
+// AISSTREAM.IO GLOBAL AIS FEED
+// Real-time worldwide vessel tracking via WebSocket.
+// Requires AISSTREAM_API_KEY environment variable (free at aisstream.io).
 // ============================================================================
 
-const LOCATIONS_URL = 'https://meri.digitraffic.fi/api/ais/v1/locations';
-const VESSELS_URL = 'https://meri.digitraffic.fi/api/ais/v1/vessels';
+const AISSTREAM_WS_URL = 'wss://stream.aisstream.io/v0/stream';
+const FLUSH_INTERVAL = 60_000;        // Flush buffer to DB every 60s
+const STALE_CLEANUP_INTERVAL = 60 * 60_000; // Clean stale records every hour
 
 // AIS ship type codes → human-readable categories
 function mapShipType(typeCode: number | undefined | null): string {
   if (typeCode == null) return 'other';
+  if (typeCode === 35) return 'military';
   if (typeCode >= 70 && typeCode <= 79) return 'cargo';
   if (typeCode >= 80 && typeCode <= 89) return 'tanker';
   if (typeCode >= 60 && typeCode <= 69) return 'passenger';
   if (typeCode >= 40 && typeCode <= 49) return 'high_speed';
   if (typeCode >= 30 && typeCode <= 39) return 'fishing';
   if (typeCode >= 50 && typeCode <= 59) return 'special';
-  if (typeCode === 35) return 'military';
   return 'other';
 }
 
@@ -89,11 +90,9 @@ function mmsiToFlag(mmsi: string): string {
   return midMap[mid] || 'Unknown';
 }
 
-// Military detection based on ship type and MMSI ranges
+// Military detection based on ship type and name keywords
 function detectMilitary(shipType: number | null | undefined, name: string): boolean {
-  // AIS ship type 35 = Military ops
   if (shipType === 35) return true;
-  // Check name for military keywords
   if (name) {
     const upper = name.toUpperCase();
     if (upper.includes('NAVY') || upper.includes('MILITARY') || upper.includes('WARSHIP') || upper.includes('HMS ') || upper.includes('USS ')) return true;
@@ -101,146 +100,116 @@ function detectMilitary(shipType: number | null | undefined, name: string): bool
   return false;
 }
 
-interface AISFeature {
-  mmsi: number;
-  type: string;
-  geometry: {
-    type: string;
-    coordinates: [number, number];
-  };
-  properties: {
-    mmsi: number;
-    sog: number;
-    cog: number;
-    navStat: number;
-    rot: number;
-    posAcc: boolean;
-    raim: boolean;
-    heading: number;
-    timestamp: number;
-    timestampExternal: string;
-  };
-}
+// ── In-memory buffer ────────────────────────────────────────────────────────
 
-interface VesselMetadata {
-  mmsi: number;
+interface VesselRecord {
+  mmsi: string;
   name: string;
-  shipType: number;
-  callSign: string;
-  imo: number;
-  destination: string;
-  draught: number;
-  eta: number;
-  posType: number;
-  referencePointA: number;
-  referencePointB: number;
-  referencePointC: number;
-  referencePointD: number;
-  timestamp: number;
+  longitude: number;
+  latitude: number;
+  heading: number | null;
+  speed: number | null;
+  course: number | null;
+  shipType: string;
+  navStatus: number | null;
+  destination: string | null;
+  draught: number | null;
+  imo: string | null;
+  callsign: string | null;
+  flag: string;
+  isMilitary: boolean;
+  updatedAt: Date;
 }
 
-// In-memory metadata cache (refreshed less frequently)
-let metadataCache = new Map<number, VesselMetadata>();
-let lastMetadataFetch = 0;
-const METADATA_REFRESH_INTERVAL = 10 * 60_000; // 10 minutes
+const vesselBuffer = new Map<string, VesselRecord>();
+let messageCount = 0;
 
-async function fetchMetadata(): Promise<void> {
-  const now = Date.now();
-  if (now - lastMetadataFetch < METADATA_REFRESH_INTERVAL && metadataCache.size > 0) {
-    return; // Use cached metadata
+// ── Message handlers ────────────────────────────────────────────────────────
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function handleMessage(msg: any): void {
+  const mmsi = String(msg.MetaData?.MMSI);
+  if (!mmsi || mmsi === 'undefined' || mmsi === '0') return;
+
+  messageCount++;
+
+  const existing = vesselBuffer.get(mmsi) || {
+    mmsi,
+    name: `MMSI ${mmsi}`,
+    longitude: 0,
+    latitude: 0,
+    heading: null,
+    speed: null,
+    course: null,
+    shipType: 'other',
+    navStatus: null,
+    destination: null,
+    draught: null,
+    imo: null,
+    callsign: null,
+    flag: mmsiToFlag(mmsi),
+    isMilitary: false,
+    updatedAt: new Date(),
+  };
+
+  // Metadata fields present on all message types
+  if (msg.MetaData?.ShipName?.trim()) {
+    existing.name = msg.MetaData.ShipName.trim();
+  }
+  if (msg.MetaData?.latitude != null) existing.latitude = msg.MetaData.latitude;
+  if (msg.MetaData?.longitude != null) existing.longitude = msg.MetaData.longitude;
+
+  const type = msg.MessageType;
+
+  if (type === 'PositionReport') {
+    const pr = msg.Message?.PositionReport;
+    if (pr) {
+      if (pr.Sog != null && pr.Sog <= 102) existing.speed = pr.Sog;
+      if (pr.Cog != null && pr.Cog <= 360) existing.course = pr.Cog;
+      if (pr.TrueHeading != null && pr.TrueHeading <= 360) existing.heading = pr.TrueHeading;
+      if (pr.NavigationalStatus != null) existing.navStatus = pr.NavigationalStatus;
+    }
+  } else if (type === 'StandardClassBPositionReport') {
+    const pr = msg.Message?.StandardClassBPositionReport;
+    if (pr) {
+      if (pr.Sog != null && pr.Sog <= 102) existing.speed = pr.Sog;
+      if (pr.Cog != null && pr.Cog <= 360) existing.course = pr.Cog;
+      if (pr.TrueHeading != null && pr.TrueHeading <= 360) existing.heading = pr.TrueHeading;
+    }
+  } else if (type === 'ShipStaticData') {
+    const sd = msg.Message?.ShipStaticData;
+    if (sd) {
+      existing.shipType = mapShipType(sd.Type);
+      if (sd.ImoNumber) existing.imo = String(sd.ImoNumber);
+      if (sd.CallSign?.trim()) existing.callsign = sd.CallSign.trim();
+      if (sd.Destination?.trim()) existing.destination = sd.Destination.trim();
+      if (sd.MaximumStaticDraught != null) existing.draught = sd.MaximumStaticDraught;
+      existing.isMilitary = detectMilitary(sd.Type, existing.name);
+    }
   }
 
-  try {
-    console.log('[Fetcher:Maritime] Fetching vessel metadata...');
-    const res = await fetch(VESSELS_URL, {
-      headers: { 'Accept-Encoding': 'gzip' },
-      signal: AbortSignal.timeout(30000),
-    });
-
-    if (!res.ok) {
-      console.error(`[Fetcher:Maritime] Metadata API error: ${res.status}`);
-      return;
-    }
-
-    const vessels: VesselMetadata[] = await res.json();
-    const newCache = new Map<number, VesselMetadata>();
-    for (const v of vessels) {
-      newCache.set(v.mmsi, v);
-    }
-    metadataCache = newCache;
-    lastMetadataFetch = now;
-    console.log(`[Fetcher:Maritime] Cached metadata for ${newCache.size} vessels`);
-  } catch (error) {
-    console.error('[Fetcher:Maritime] Metadata fetch error:', error);
-  }
+  existing.updatedAt = new Date();
+  vesselBuffer.set(mmsi, existing);
 }
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
-/** Returns true on success, false on failure. */
-export async function fetchMaritime(): Promise<boolean> {
+// ── DB flush ────────────────────────────────────────────────────────────────
+
+async function flushBuffer(): Promise<void> {
+  if (vesselBuffer.size === 0) return;
+
+  // Only flush vessels that have a valid position
+  const vessels = Array.from(vesselBuffer.values())
+    .filter(v => v.latitude !== 0 && v.longitude !== 0);
+
+  vesselBuffer.clear();
+
+  if (vessels.length === 0) return;
+
   const db = getDb();
-  const startTime = Date.now();
-
-  console.log('[Fetcher:Maritime] Fetching AIS vessel positions from Digitraffic...');
+  const BATCH_SIZE = 1000;
 
   try {
-    // Fetch metadata first (cached, refreshes every 10 min)
-    await fetchMetadata();
-
-    // Fetch current positions
-    const res = await fetch(LOCATIONS_URL, {
-      headers: { 'Accept-Encoding': 'gzip' },
-      signal: AbortSignal.timeout(30000),
-    });
-
-    if (!res.ok) {
-      const msg = `Digitraffic AIS API error: ${res.status}`;
-      console.error(`[Fetcher:Maritime] ${msg}`);
-      await updateFetcherState('maritime', msg);
-      return false;
-    }
-
-    const data = await res.json();
-    const features: AISFeature[] = data.features || [];
-
-    if (features.length === 0) {
-      console.warn('[Fetcher:Maritime] No vessel positions returned');
-      await updateFetcherState('maritime', 'No positions returned');
-      return false;
-    }
-
-    // Build vessel records by joining positions with metadata
-    const vessels = features
-      .filter(f => f.geometry?.coordinates?.[0] != null && f.geometry?.coordinates?.[1] != null)
-      .map(f => {
-        const mmsi = f.mmsi || f.properties.mmsi;
-        const meta = metadataCache.get(mmsi);
-        const name = meta?.name?.trim() || `MMSI ${mmsi}`;
-        const shipTypeCode = meta?.shipType ?? null;
-
-        return {
-          mmsi: String(mmsi),
-          name,
-          longitude: f.geometry.coordinates[0],
-          latitude: f.geometry.coordinates[1],
-          heading: f.properties.heading > 360 ? null : f.properties.heading,
-          speed: f.properties.sog > 102 ? null : f.properties.sog, // 102.3 = not available
-          course: f.properties.cog > 360 ? null : f.properties.cog,
-          shipType: mapShipType(shipTypeCode),
-          navStatus: f.properties.navStat,
-          destination: meta?.destination?.trim() || null,
-          draught: meta?.draught ?? null,
-          imo: meta?.imo ? String(meta.imo) : null,
-          callsign: meta?.callSign?.trim() || null,
-          flag: mmsiToFlag(String(mmsi)),
-          isMilitary: detectMilitary(shipTypeCode, name),
-          updatedAt: new Date(),
-        };
-      });
-
-    console.log(`[Fetcher:Maritime] Parsed ${vessels.length} vessels with positions`);
-
-    // Batch upsert
-    const BATCH_SIZE = 500;
     for (let i = 0; i < vessels.length; i += BATCH_SIZE) {
       const batch = vessels.slice(i, i + BATCH_SIZE);
       await db.insert(vesselPositions).values(batch).onConflictDoUpdate({
@@ -265,21 +234,25 @@ export async function fetchMaritime(): Promise<boolean> {
       });
     }
 
-    // Clean stale positions (> 24 hours old — keep data cached when fetcher restarts)
+    console.log(`[Maritime] Flushed ${vessels.length} vessels to DB (${messageCount} messages since last flush)`);
+    messageCount = 0;
+
+    await updateFetcherState('maritime', null);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : 'Unknown error';
+    console.error(`[Maritime] Flush error: ${msg}`);
+    await updateFetcherState('maritime', msg);
+  }
+}
+
+async function cleanStaleRecords(): Promise<void> {
+  try {
+    const db = getDb();
     await db.delete(vesselPositions).where(
       sql`${vesselPositions.updatedAt} < NOW() - INTERVAL '24 hours'`
     );
-
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log(`[Fetcher:Maritime] Upserted ${vessels.length} vessel positions in ${elapsed}s`);
-
-    await updateFetcherState('maritime', null);
-    return true;
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Unknown error';
-    console.error(`[Fetcher:Maritime] Error: ${msg}`);
-    await updateFetcherState('maritime', msg);
-    return false;
+  } catch {
+    // Stale cleanup is best-effort
   }
 }
 
@@ -299,4 +272,86 @@ async function updateFetcherState(sourceId: string, error: string | null): Promi
       fetchCount: sql`${fetcherState.fetchCount} + 1`,
     },
   });
+}
+
+// ── WebSocket connection ────────────────────────────────────────────────────
+
+let ws: WebSocket | null = null;
+let flushTimer: ReturnType<typeof setInterval> | null = null;
+let cleanupTimer: ReturnType<typeof setInterval> | null = null;
+let reconnectAttempts = 0;
+let shouldRun = true;
+
+function connect(): void {
+  const apiKey = process.env.AISSTREAM_API_KEY;
+  if (!apiKey) {
+    console.error('[Maritime] AISSTREAM_API_KEY not set — skipping maritime stream');
+    return;
+  }
+
+  console.log('[Maritime] Connecting to AISStream.io...');
+  ws = new WebSocket(AISSTREAM_WS_URL);
+
+  ws.on('open', () => {
+    reconnectAttempts = 0;
+    console.log('[Maritime] Connected to AISStream.io — subscribing to global AIS feed');
+
+    ws!.send(JSON.stringify({
+      APIKey: apiKey,
+      BoundingBoxes: [[[-90, -180], [90, 180]]],
+    }));
+  });
+
+  ws.on('message', (data) => {
+    try {
+      const msg = JSON.parse(data.toString());
+      handleMessage(msg);
+    } catch {
+      // Ignore malformed messages
+    }
+  });
+
+  ws.on('close', (code, reason) => {
+    console.log(`[Maritime] WebSocket closed (code=${code}, reason=${reason || 'none'})`);
+    scheduleReconnect();
+  });
+
+  ws.on('error', (err) => {
+    console.error('[Maritime] WebSocket error:', err.message);
+  });
+}
+
+function scheduleReconnect(): void {
+  if (!shouldRun) return;
+  reconnectAttempts++;
+  const delay = Math.min(1000 * Math.pow(2, Math.min(reconnectAttempts, 6)), 60_000);
+  console.log(`[Maritime] Reconnecting in ${(delay / 1000).toFixed(0)}s (attempt ${reconnectAttempts})`);
+  setTimeout(connect, delay);
+}
+
+// ── Public API ──────────────────────────────────────────────────────────────
+
+export function startMaritimeStream(): { stop: () => void } {
+  shouldRun = true;
+  connect();
+
+  flushTimer = setInterval(() => flushBuffer(), FLUSH_INTERVAL);
+  cleanupTimer = setInterval(() => cleanStaleRecords(), STALE_CLEANUP_INTERVAL);
+
+  // Also clean stale on startup
+  cleanStaleRecords();
+
+  return {
+    stop() {
+      shouldRun = false;
+      if (flushTimer) clearInterval(flushTimer);
+      if (cleanupTimer) clearInterval(cleanupTimer);
+      if (ws) {
+        ws.removeAllListeners();
+        ws.close();
+      }
+      // Final flush
+      flushBuffer();
+    },
+  };
 }

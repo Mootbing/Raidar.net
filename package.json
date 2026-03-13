@@ -22,6 +22,7 @@
     "react-dom": "19.2.3",
     "satellite.js": "^6.0.2",
     "three": "^0.182.0",
+    "ws": "^8.19.0",
     "zustand": "^5.0.9"
   },
   "devDependencies": {
@@ -29,6 +30,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/ws": "^8.18.1",
     "concurrently": "^9.2.1",
     "drizzle-kit": "^0.31.9",
     "eslint": "^9",

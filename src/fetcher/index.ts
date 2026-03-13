@@ -20,7 +20,7 @@ if (fs.existsSync(envPath)) {
 
 import { fetchSatellites } from './fetchSatellites';
 import { fetchAircraft } from './fetchAircraft';
-import { fetchMaritime } from './fetchMaritime';
+import { startMaritimeStream } from './fetchMaritime';
 import { fetchNews } from './fetchNews';
 
 // ============================================================================
@@ -31,26 +31,17 @@ import { fetchNews } from './fetchNews';
 const AIRCRAFT_BASE_INTERVAL = 10_000;  // 10 seconds on success
 const AIRCRAFT_MAX_INTERVAL = 5 * 60_000; // 5 minutes max backoff
 const SATELLITE_INTERVAL = 4 * 60 * 60 * 1000; // 4 hours
-const MARITIME_BASE_INTERVAL = 60_000;  // 60 seconds on success
-const MARITIME_MAX_INTERVAL = 5 * 60_000; // 5 minutes max backoff
 const NEWS_BASE_INTERVAL = 5 * 60_000;   // 5 minutes on success
 const NEWS_MAX_INTERVAL = 15 * 60_000;   // 15 minutes max backoff
 
 let isRunning = true;
 let aircraftConsecutiveErrors = 0;
-let maritimeConsecutiveErrors = 0;
 let newsConsecutiveErrors = 0;
 
 function getAircraftInterval(): number {
   if (aircraftConsecutiveErrors === 0) return AIRCRAFT_BASE_INTERVAL;
   const backoff = AIRCRAFT_BASE_INTERVAL * Math.pow(2, Math.min(aircraftConsecutiveErrors, 5));
   return Math.min(backoff, AIRCRAFT_MAX_INTERVAL);
-}
-
-function getMaritimeInterval(): number {
-  if (maritimeConsecutiveErrors === 0) return MARITIME_BASE_INTERVAL;
-  const backoff = MARITIME_BASE_INTERVAL * Math.pow(2, Math.min(maritimeConsecutiveErrors, 5));
-  return Math.min(backoff, MARITIME_MAX_INTERVAL);
 }
 
 function getNewsInterval(): number {
@@ -81,26 +72,15 @@ async function aircraftLoop() {
   }
 }
 
-async function maritimeLoop() {
-  while (isRunning) {
-    try {
-      const success = await fetchMaritime();
-      if (success) {
-        maritimeConsecutiveErrors = 0;
-      } else {
-        maritimeConsecutiveErrors++;
-      }
-    } catch (error) {
-      maritimeConsecutiveErrors++;
-      console.error('[Fetcher] Maritime loop error:', error);
-    }
+let maritimeStream: { stop: () => void } | null = null;
 
-    const interval = getMaritimeInterval();
-    if (maritimeConsecutiveErrors > 0) {
-      console.log(`[Fetcher] Maritime backoff: ${(interval / 1000).toFixed(0)}s (${maritimeConsecutiveErrors} consecutive errors)`);
-    }
-    await sleep(interval);
+async function maritimeLoop() {
+  maritimeStream = startMaritimeStream();
+  // Keep alive until shutdown
+  while (isRunning) {
+    await sleep(5000);
   }
+  maritimeStream.stop();
 }
 
 async function satelliteLoop() {
@@ -154,7 +134,7 @@ async function main() {
   console.log('[Fetcher] Starting data fetcher...');
   console.log(`[Fetcher] Aircraft base interval: ${AIRCRAFT_BASE_INTERVAL / 1000}s (with exponential backoff on error)`);
   console.log(`[Fetcher] Satellite interval: ${SATELLITE_INTERVAL / 3600000}h`);
-  console.log(`[Fetcher] Maritime base interval: ${MARITIME_BASE_INTERVAL / 1000}s (with exponential backoff on error)`);
+  console.log(`[Fetcher] Maritime: AISStream.io WebSocket (real-time global AIS)`);
   console.log(`[Fetcher] News base interval: ${NEWS_BASE_INTERVAL / 1000}s (with exponential backoff on error)`);
 
   // Run all loops concurrently
