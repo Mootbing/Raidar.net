@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Bullhorn Aerosystems",
+  title: "Raidar Observability Network",
   description: "Open source aerosystem defence engine with commercial airlines as interface example",
   icons: {
     icon: "/@bullhorn.png",

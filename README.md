@@ -1,8 +1,8 @@
-# BULLHORN AEROSYSTEMS
+# RAIDAR OBSERVABILITY NETWORK
 
 Open source aerosystem defence engine with commercial airlines as interface example. Built with Next.js, React Three Fiber, and the OpenSky Network API.
 
-![Bullhorn Radar](https://img.shields.io/badge/version-0.1.0-blue)
+![Raidar Observability Network](https://img.shields.io/badge/version-0.1.0-blue)
 ![Next.js](https://img.shields.io/badge/Next.js-15-black)
 ![Three.js](https://img.shields.io/badge/Three.js-r170-green)
 
@@ -30,8 +30,8 @@ Open source aerosystem defence engine with commercial airlines as interface exam
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/Mootbing/Bullhorn-Aerosystems.git
-   cd Bullhorn-Aerosystems
+   git clone https://github.com/Mootbing/Raidar-Observability-Network.git
+   cd Raidar-Observability-Network
    ```
 
 2. **Install dependencies**

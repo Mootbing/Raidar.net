@@ -71,7 +71,7 @@ export class ErrorBoundary extends Component<Props, State> {
           <div className="flex flex-col items-center gap-8 w-full max-w-[800px]">
             {/* Title - matching loading screen style */}
             <div className="text-white text-2xl tracking-[0.3em] font-light">
-              BULLHORN AEROSYSTEMS HAS CRASHED
+              RAIDAR OBSERVABILITY NETWORK HAS CRASHED
             </div>
 
             {/* Error dump */}
