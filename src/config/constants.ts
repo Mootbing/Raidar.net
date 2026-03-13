@@ -248,13 +248,13 @@ export const INPUT = {
 export const INTRO = {
   // Loading screen stage durations (ms)
   STAGES: [
-    { text: 'ESTABLISHING_SECURE_CONNECTION', duration: 400 },
-    { text: 'AUTHENTICATING_CLEARANCE_LEVEL', duration: 350 },
-    { text: 'LOADING_SATELLITE_IMAGERY', duration: 500 },
-    { text: 'CALIBRATING_RADAR_SYSTEMS', duration: 450 },
-    { text: 'SYNCHRONIZING_FLIGHT_DATA', duration: 400 },
-    { text: 'ACQUIRING_GPS_COORDINATES', duration: 600 },
-    { text: 'INITIALIZING_TRACKING_MATRIX', duration: 350 },
+    { text: 'INITIALIZING_RENDERER', duration: 400 },
+    { text: 'DRAWING_BORDERS', duration: 350 },
+    { text: 'RENDERING_COASTLINES', duration: 500 },
+    { text: 'LOADING_AIRPORT_DATA', duration: 450 },
+    { text: 'FETCHING_DOCK_POSITIONS', duration: 400 },
+    { text: 'FETCHING_MARITIME_DATA', duration: 600 },
+    { text: 'FETCHING_AIRCRAFT_DATA', duration: 350 },
     { text: 'SYSTEM_READY', duration: 300 },
   ],
   
