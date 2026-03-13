@@ -198,7 +198,7 @@ export function MaritimeLayer() {
 
     // Start animation when maritime phase begins
     // If intro already complete (layer toggled back on), skip sweep
-    if (introPhase === 'maritime' || introPhase === 'aircraft' || introPhase === 'satellites' || introPhase === 'complete') {
+    if (introPhase === 'maritime' || introPhase === 'aircraft' || introPhase === 'news' || introPhase === 'satellites' || introPhase === 'complete') {
       if (!animationStarted.current) {
         animationStarted.current = true;
         animationTime.current = introPhase === 'complete'

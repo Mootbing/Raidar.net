@@ -134,7 +134,7 @@ function LargeAirportsInstanced({ airports }: { airports: Airport[] }) {
     
     // Start animation when airports phase begins
     // If intro already complete (layer toggled back on), skip sweep
-    if (introPhase === 'airports' || introPhase === 'docks' || introPhase === 'maritime' || introPhase === 'aircraft' || introPhase === 'satellites' || introPhase === 'complete') {
+    if (introPhase === 'airports' || introPhase === 'docks' || introPhase === 'maritime' || introPhase === 'aircraft' || introPhase === 'news' || introPhase === 'satellites' || introPhase === 'complete') {
       if (!animationStarted.current) {
         animationStarted.current = true;
         animationTime.current = introPhase === 'complete'
@@ -323,7 +323,7 @@ function SmallAirportsInstanced({ airports }: { airports: Airport[] }) {
     const { dummy, vec3_a } = allocs.current;
     
     // If intro already complete (layer toggled back on), skip sweep
-    if (introPhase === 'airports' || introPhase === 'docks' || introPhase === 'maritime' || introPhase === 'aircraft' || introPhase === 'satellites' || introPhase === 'complete') {
+    if (introPhase === 'airports' || introPhase === 'docks' || introPhase === 'maritime' || introPhase === 'aircraft' || introPhase === 'news' || introPhase === 'satellites' || introPhase === 'complete') {
       if (!animationStarted.current) {
         animationStarted.current = true;
         animationTime.current = introPhase === 'complete'

@@ -33,7 +33,7 @@ const SWEEP_TEXTS = [
   'SCANNING_NEWS_FEEDS',
   'TRACKING_SATELLITES',
 ];
-const SWEEP_DELAY = 400; // ms minimum between sweep animations
+const SWEEP_DELAY = 150; // ms minimum between sweep animations
 const MAX_LOADING_TIMEOUT = 15000; // Force completion after 15s
 
 function LoadingOverlay() {
@@ -143,8 +143,8 @@ function LoadingOverlay() {
       setTimeout(() => {
         setIntroPhase('complete');
         setLocationReady(true);
-      }, 300);
-    }, 600);
+      }, 200);
+    }, 300);
 
     return () => clearTimeout(timer);
   }, [dataLoadState, done, setIntroPhase, setLoadingProgress, setLocationReady]);

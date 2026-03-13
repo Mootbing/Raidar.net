@@ -168,7 +168,7 @@ export function DocksLayer() {
 
     // Start animation when docks phase begins
     // If intro already complete (layer toggled back on), skip sweep
-    if (introPhase === 'docks' || introPhase === 'maritime' || introPhase === 'aircraft' || introPhase === 'satellites' || introPhase === 'complete') {
+    if (introPhase === 'docks' || introPhase === 'maritime' || introPhase === 'aircraft' || introPhase === 'news' || introPhase === 'satellites' || introPhase === 'complete') {
       if (!animationStarted.current) {
         animationStarted.current = true;
         animationTime.current = introPhase === 'complete'
