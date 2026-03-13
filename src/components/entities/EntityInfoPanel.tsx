@@ -199,7 +199,7 @@ function AircraftInfoContent({
             <span className={TEXT.SECONDARY}>SQK: <ScrollingText text={aircraft.squawk} className={TEXT.WARNING} glowColor={glowColor} /></span>
           </>
         )}
-        {aircraft.spi && <span className={`${TEXT.ERROR} animate-pulse`}>SPI</span>}
+        {aircraft.spi && <span className={TEXT.ERROR}>SPI</span>}
         {aircraft.isMilitary && (
           <>
             <span className={TEXT.DARK}>|</span>
@@ -548,6 +548,144 @@ function SatelliteInfoContent({
 }
 
 // ============================================================================
+// DOCK / PORT INFO CONTENT
+// ============================================================================
+
+const PORT_TYPE_LABELS: Record<string, string> = {
+  container: 'CONTAINER',
+  bulk: 'BULK CARGO',
+  naval: 'NAVAL BASE',
+  oil_terminal: 'OIL TERMINAL',
+  mixed: 'MIXED',
+};
+
+function DockInfoContent({
+  dock,
+  glowColor,
+}: {
+  dock: any;
+  glowColor: 'green' | 'yellow';
+}) {
+  return (
+    <div className="space-y-2 select-none">
+      {/* Header - Name & Code */}
+      <div className={`flex items-start justify-between gap-3 ${BORDER.DIVIDER_B} pb-2`}>
+        <div className="flex-1 min-w-0">
+          <div className={`${TEXT.PRIMARY} font-medium text-sm truncate`}>
+            <ScrollingText text={dock.name || 'Unknown Port'} glowColor={glowColor} />
+          </div>
+          <div className={`${TEXT.SECONDARY} ${TEXT.SM} truncate`}>
+            {PORT_TYPE_LABELS[dock.portType] || dock.portType?.toUpperCase() || 'PORT'}
+          </div>
+        </div>
+        <div className="text-right shrink-0">
+          <div className={`${TEXT.ACCENT} ${TEXT.MONO}`}>
+            <ScrollingText text={dock.portCode || dock.id} glowColor="green" />
+          </div>
+          <div className={`${TEXT.DIMMED} ${TEXT.SM}`}>CODE</div>
+        </div>
+      </div>
+
+      {/* Location */}
+      <div className={`${BORDER.DIVIDER} pt-2`}>
+        <div className={`${TEXT.DIMMED} ${TEXT.SM} tracking-wider mb-1`}>LOCATION</div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+          <DataRow label="COUNTRY" value={dock.country || 'N/A'} glowColor={glowColor} />
+          <DataRow label="TYPE" value={PORT_TYPE_LABELS[dock.portType] || 'N/A'} glowColor={glowColor} />
+          <DataRow label="LAT" value={formatCoord(dock.lat, true)} glowColor={glowColor} />
+          <DataRow label="LON" value={formatCoord(dock.lon, false)} glowColor={glowColor} />
+        </div>
+      </div>
+
+      {/* Capacity (if available) */}
+      {dock.capacity && (
+        <div className={`${BORDER.DIVIDER} pt-2`}>
+          <div className={`${TEXT.DIMMED} ${TEXT.SM} tracking-wider mb-1`}>CAPACITY</div>
+          <div className="space-y-0.5">
+            <DataRow label="TEU" value={dock.capacity.toLocaleString()} glowColor={glowColor} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// NEWS EVENT INFO CONTENT
+// ============================================================================
+
+const SEVERITY_ACCENT: Record<string, string> = {
+  low: 'text-[#00ff88]',
+  medium: 'text-[#ffcc00]',
+  high: 'text-[#ff8800]',
+  critical: 'text-[#ff2222]',
+};
+
+function formatTimeAgo(timestamp: number): string {
+  const diff = Math.floor((Date.now() - timestamp) / 1000);
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
+function NewsInfoContent({
+  news,
+  glowColor,
+}: {
+  news: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  glowColor: 'green' | 'yellow';
+}) {
+  return (
+    <div className="space-y-2 select-none">
+      {/* Header - Headline */}
+      <div className={`${BORDER.DIVIDER_B} pb-2`}>
+        <div className={`${TEXT.PRIMARY} font-medium text-sm break-words leading-tight`}>
+          {news.headline}
+        </div>
+        <div className={`${TEXT.SECONDARY} ${TEXT.SM} mt-1`}>
+          {news.source}
+        </div>
+      </div>
+
+      {/* Classification */}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+        <DataRow label="CATEGORY" value={(news.category || 'unknown').toUpperCase()} glowColor={glowColor} />
+        <div className="flex justify-between items-start gap-2 py-0.5">
+          <span className={`${TEXT.MUTED} shrink-0`}>SEVERITY</span>
+          <span className={`${SEVERITY_ACCENT[news.severity] || TEXT.PRIMARY} text-right`}>
+            {(news.severity || 'unknown').toUpperCase()}
+          </span>
+        </div>
+      </div>
+
+      {/* Location & Time */}
+      <div className={`${BORDER.DIVIDER} pt-2`}>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+          <DataRow label="LAT" value={formatCoord(news.lat, true)} glowColor={glowColor} />
+          <DataRow label="LON" value={formatCoord(news.lon, false)} glowColor={glowColor} />
+          <DataRow label="TIME" value={news.publishedAt ? formatTimeAgo(news.publishedAt) : 'N/A'} glowColor={glowColor} />
+        </div>
+      </div>
+
+      {/* Source Link */}
+      {news.url && (
+        <div className={`${BORDER.DIVIDER} pt-2`}>
+          <a
+            href={news.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`${TEXT.ACCENT_BLUE} ${TEXT.SM} hover:underline`}
+          >
+            OPEN SOURCE &rarr;
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
 // ENTITY INFO PANEL (Simplified animation - no state machine)
 // ============================================================================
 
@@ -625,13 +763,13 @@ export function EntityInfoPanel({ onClose: _onClose }: EntityInfoPanelProps) {
   
   const typeLabel = displayedRef ? getEntityTypeName(displayedRef.type).toUpperCase() : 'ENTITY';
   const showContent = displayedRef !== null && displayedEntity !== null;
-  
+
   return (
-    <div 
-      className={`bg-black/90 transition-all duration-300 ease-out ${BORDER.SUBTLE} ` + 
+    <div
+      className={`bg-black/30 backdrop-blur-md transition-all duration-300 ease-out ${BORDER.SUBTLE} ` +
         (showContent ? 'border ' : 'border-0 ') +
         (isHovering && !isSelected ? 'border-dashed' : 'border-solid')}
-      style={{ 
+      style={{
         width: `${UI.INFO_PANEL_WIDTH}px`,
         maxHeight: showContent ? `${UI.INFO_PANEL_MAX_HEIGHT}px` : '0px',
         opacity: isVisible ? 1 : 0,
@@ -643,8 +781,8 @@ export function EntityInfoPanel({ onClose: _onClose }: EntityInfoPanelProps) {
       {showContent && (
         <>
           {/* Header */}
-          <div 
-            className={`${BORDER.DIVIDER_B} px-3 py-2 ${TEXT.BASE} ${TEXT.SECONDARY} transition-colors duration-300 flex justify-between items-center ` + 
+          <div
+            className={`${BORDER.DIVIDER_B} px-3 py-2 ${TEXT.BASE} ${TEXT.SECONDARY} transition-colors duration-300 flex justify-between items-center ` +
               (isHovering && !isSelected ? 'border-dashed' : 'border-solid')}
           >
             <span>{typeLabel}_INFO</span>
@@ -689,7 +827,13 @@ export function EntityInfoPanel({ onClose: _onClose }: EntityInfoPanelProps) {
               {displayedRef?.type === 'satellite' && displayedEntity && (
                 <SatelliteInfoContent sat={displayedEntity} glowColor={glowColor} />
               )}
-              {displayedRef && !['aircraft', 'airport', 'ship', 'satellite'].includes(displayedRef.type) && (
+              {displayedRef?.type === 'dock' && displayedEntity && (
+                <DockInfoContent dock={displayedEntity} glowColor={glowColor} />
+              )}
+              {displayedRef?.type === 'news_event' && displayedEntity && (
+                <NewsInfoContent news={displayedEntity} glowColor={glowColor} />
+              )}
+              {displayedRef && !['aircraft', 'airport', 'ship', 'satellite', 'dock', 'news_event'].includes(displayedRef.type) && (
                 <div className={TEXT.SECONDARY}>
                   <ScrollingText text={`${typeLabel} info not yet implemented`} glowColor={glowColor} />
                 </div>

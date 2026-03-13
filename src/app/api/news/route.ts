@@ -1,33 +1,59 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getDb } from '@/db/client';
+import { newsEvents } from '@/db/schema';
+import { sql, and, gte, lte } from 'drizzle-orm';
 
 /**
  * Real-Time News API
  *
- * Aggregates and geocodes defense/security news from multiple sources.
+ * Serves cached GDELT news events from Postgres.
+ * The standalone fetcher populates the news_events table every 5 minutes.
  *
- * Data sources:
- * - GDELT Project (free): https://api.gdeltproject.org/api/v2/doc/doc
- *   - Real-time global news with built-in geocoding
- *   - Filters: theme (MILITARY, TERROR, etc.), tone, location
- * - NewsAPI (freemium): https://newsapi.org
- *   - Requires API key, good for keyword-based search
- * - RSS feeds from defense outlets:
- *   - Defense News, Jane's, Breaking Defense, The War Zone
- *   - Reuters World, AP International
- *
- * Geocoding pipeline:
- * - GDELT provides coordinates natively
- * - For other sources, extract location entities from headlines
- *   using a geocoding service (Nominatim, MapBox, Google)
- *
- * Query params: category, severity, limit
- * Returns: { events: NewsEventEntity[] }
+ * Query params: lamin, lamax, lomin, lomax (viewport bounds), limit
+ * Returns: { events: [...], source: 'neon', count: number }
  */
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const _category = searchParams.get('category');
-  const _limit = searchParams.get('limit') || '50';
+  const lamin = parseFloat(searchParams.get('lamin') || '-90');
+  const lamax = parseFloat(searchParams.get('lamax') || '90');
+  const lomin = parseFloat(searchParams.get('lomin') || '-180');
+  const lomax = parseFloat(searchParams.get('lomax') || '180');
+  const limit = Math.min(parseInt(searchParams.get('limit') || '100', 10), 500);
 
-  // TODO: Implement news aggregation + geocoding
-  return NextResponse.json({ events: [], source: 'placeholder' });
+  try {
+    const db = getDb();
+
+    const rows = await db
+      .select()
+      .from(newsEvents)
+      .where(
+        and(
+          gte(newsEvents.latitude, lamin),
+          lte(newsEvents.latitude, lamax),
+          gte(newsEvents.longitude, lomin),
+          lte(newsEvents.longitude, lomax),
+          // Only return events from the last 6 hours
+          gte(newsEvents.publishedAt, sql`NOW() - INTERVAL '6 hours'`)
+        )
+      )
+      .orderBy(sql`${newsEvents.publishedAt} DESC`)
+      .limit(limit);
+
+    const events = rows.map((r) => ({
+      id: r.id,
+      headline: r.headline,
+      source: r.source,
+      url: r.url,
+      lat: r.latitude,
+      lon: r.longitude,
+      category: r.category,
+      severity: r.severity,
+      publishedAt: r.publishedAt.getTime(),
+    }));
+
+    return NextResponse.json({ events, source: 'neon', count: events.length });
+  } catch (error) {
+    console.error('[News API] DB query failed:', error);
+    return NextResponse.json({ events: [], source: 'neon', error: 'Database query failed' }, { status: 502 });
+  }
 }

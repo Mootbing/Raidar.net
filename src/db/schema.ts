@@ -70,6 +70,61 @@ export const satelliteTle = pgTable('satellite_tle', {
 });
 
 // ============================================================================
+// VESSEL POSITIONS (upserted every ~60s by fetcher from AIS data)
+// ============================================================================
+
+export const vesselPositions = pgTable(
+  'vessel_positions',
+  {
+    mmsi: text('mmsi').primaryKey(),
+    name: text('name'),
+    longitude: real('longitude').notNull(),
+    latitude: real('latitude').notNull(),
+    heading: real('heading'),
+    speed: real('speed'),
+    course: real('course'),
+    shipType: text('ship_type'),
+    navStatus: smallint('nav_status'),
+    destination: text('destination'),
+    draught: real('draught'),
+    imo: text('imo'),
+    callsign: text('callsign'),
+    flag: text('flag'),
+    isMilitary: boolean('is_military').default(false),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index('idx_vessel_lon_lat').on(table.longitude, table.latitude),
+    index('idx_vessel_updated').on(table.updatedAt),
+  ]
+);
+
+// ============================================================================
+// NEWS EVENTS (fetched from GDELT every 5 minutes by fetcher)
+// ============================================================================
+
+export const newsEvents = pgTable(
+  'news_events',
+  {
+    id: text('id').primaryKey(),
+    headline: text('headline').notNull(),
+    source: text('source').notNull(),
+    url: text('url'),
+    longitude: real('longitude').notNull(),
+    latitude: real('latitude').notNull(),
+    category: text('category').notNull(),
+    severity: text('severity').notNull(),
+    tone: real('tone'),
+    publishedAt: timestamp('published_at', { withTimezone: true }).notNull(),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index('idx_news_lon_lat').on(table.longitude, table.latitude),
+    index('idx_news_published').on(table.publishedAt),
+  ]
+);
+
+// ============================================================================
 // FETCHER BOOKKEEPING
 // ============================================================================
 
@@ -88,4 +143,6 @@ export const fetcherState = pgTable('fetcher_state', {
 export type AircraftPosition = typeof aircraftPositions.$inferSelect;
 export type AircraftMetadataRow = typeof aircraftMetadata.$inferSelect;
 export type SatelliteTleRow = typeof satelliteTle.$inferSelect;
+export type VesselPosition = typeof vesselPositions.$inferSelect;
+export type NewsEventRow = typeof newsEvents.$inferSelect;
 export type FetcherStateRow = typeof fetcherState.$inferSelect;

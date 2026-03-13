@@ -1,23 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { readFile } from 'fs/promises';
+import path from 'path';
 
 /**
  * Shipping Docks / Ports API
  *
- * Serves port/dock data. This is static data loaded from a dataset file.
- * Similar to the airports endpoint.
- *
- * Data sources:
- * - World Port Index (WPI): https://msi.nga.mil/Publications/WPI
- *   - ~3,700 ports worldwide with coordinates, type, capacity
- * - OpenStreetMap extract (more comprehensive but needs filtering)
- * - UN LOCODE: https://unece.org/trade/uncefact/unlocode
- *
- * Data file: /public/data/ports.json (to be created from WPI or OSM)
+ * Serves port/dock data from a static JSON dataset.
+ * Data is cached in memory after first read (static data, never changes).
  *
  * Returns: { docks: DockEntity[] }
  */
+
+let cache: any[] | null = null;
+
 export async function GET(_request: NextRequest) {
-  // TODO: Load port dataset from /public/data/ports.json
-  // Same pattern as /api/airports - load from static JSON file
-  return NextResponse.json({ docks: [], source: 'placeholder' });
+  try {
+    if (!cache) {
+      const filePath = path.join(process.cwd(), 'public', 'data', 'ports.json');
+      const raw = await readFile(filePath, 'utf-8');
+      cache = JSON.parse(raw);
+      console.log(`[Docks API] Loaded ${cache!.length} ports`);
+    }
+    return NextResponse.json({ docks: cache });
+  } catch (error) {
+    console.error('[Docks API] Error:', error);
+    return NextResponse.json(
+      { error: 'Failed to load port data', docks: [] },
+      { status: 500 }
+    );
+  }
 }

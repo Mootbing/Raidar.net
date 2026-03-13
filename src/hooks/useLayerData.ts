@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { useRadarStore, ViewportBounds } from '@/store/gameStore';
 import { LayerId } from '@/types/layers';
 import { POLLING } from '@/config/constants';
@@ -34,8 +34,10 @@ export function useLayerData<T extends { id: string }>(layerId: LayerId): T[] {
   const source = getDataSource(layerId) as DataSource<T> | undefined;
   const layerState = useRadarStore((s) => s.layers[layerId]);
   const setLayerState = useRadarStore((s) => s.setLayerState);
-  const viewportBounds = useRadarStore((s) => s.viewportBounds);
   const locationReady = useRadarStore((s) => s.locationReady);
+
+  // Force re-render when fetch completes, even if entityCount stays the same
+  const [, setLastFetchTime] = useState(0);
 
   // Persistent spatial cache (survives re-renders)
   const cacheRef = useRef<SpatialCache<T> | null>(null);
@@ -115,6 +117,7 @@ export function useLayerData<T extends { id: string }>(layerId: LayerId): T[] {
           loaded: true,
           entityCount: visibleRef.current.length,
         });
+        setLastFetchTime(Date.now());
       } catch (e: unknown) {
         if ((e as Error).name === 'AbortError') return;
         errorsRef.current++;
@@ -139,28 +142,47 @@ export function useLayerData<T extends { id: string }>(layerId: LayerId): T[] {
   useEffect(() => {
     if (initRef.current) return;
     if (!layerState?.enabled || !locationReady || !source) return;
-    if (!isGlobal && !viewportBounds) return;
+    const bounds = useRadarStore.getState().viewportBounds;
+    if (!isGlobal && !bounds) return;
 
     initRef.current = true;
-    // Global layers can fetch with null bounds (doFetch handles it)
-    doFetch(viewportBounds, true);
-  }, [layerState?.enabled, locationReady, viewportBounds, isGlobal, source, doFetch]);
+    doFetch(bounds, true);
+  }, [layerState?.enabled, locationReady, isGlobal, source, doFetch]);
 
-  // ----- viewport change → refetch / update visible -------------------------
+  // ----- viewport change via store subscription (avoids React re-renders) ----
   useEffect(() => {
-    if (!layerState?.enabled || !locationReady || !viewportBounds || isGlobal) return;
+    if (!layerState?.enabled || !locationReady || isGlobal) return;
 
-    const timeout = setTimeout(() => {
-      doFetch(viewportBounds);
-    }, POLLING.DEBOUNCE_VIEWPORT_CHANGE);
+    let timeout: ReturnType<typeof setTimeout>;
+    let prevBounds = useRadarStore.getState().viewportBounds;
 
-    return () => clearTimeout(timeout);
-  }, [viewportBounds, layerState?.enabled, locationReady, isGlobal, doFetch]);
+    const unsubscribe = useRadarStore.subscribe((state) => {
+      const bounds = state.viewportBounds;
+      if (bounds === prevBounds) return;
+      prevBounds = bounds;
+      if (!bounds) return;
+
+      // Handle initial fetch if not yet initialized
+      if (!initRef.current) {
+        initRef.current = true;
+        doFetch(bounds, true);
+        return;
+      }
+
+      clearTimeout(timeout);
+      timeout = setTimeout(() => doFetch(bounds), POLLING.DEBOUNCE_VIEWPORT_CHANGE);
+    });
+
+    return () => {
+      unsubscribe();
+      clearTimeout(timeout);
+    };
+  }, [layerState?.enabled, locationReady, isGlobal, doFetch]);
 
   // ----- polling -------------------------------------------------------------
   useEffect(() => {
     if (!layerState?.enabled || !locationReady || pollInterval <= 0) return;
-    if (!isGlobal && !viewportBounds) return;
+    if (!isGlobal && !useRadarStore.getState().viewportBounds) return;
 
     const backoff = Math.min(Math.pow(2, errorsRef.current), POLLING.MAX_BACKOFF_MULTIPLIER);
     const interval = pollInterval * backoff;
@@ -171,7 +193,7 @@ export function useLayerData<T extends { id: string }>(layerId: LayerId): T[] {
     }, interval);
 
     return () => clearInterval(timer);
-  }, [layerState?.enabled, locationReady, viewportBounds, pollInterval, isGlobal, doFetch]);
+  }, [layerState?.enabled, locationReady, pollInterval, isGlobal, doFetch]);
 
   // ----- cache cleanup -------------------------------------------------------
   useEffect(() => {

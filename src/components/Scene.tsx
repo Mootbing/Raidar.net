@@ -12,6 +12,7 @@ import { MaritimeLayer } from './layers/MaritimeLayer';
 import { SatelliteLayer } from './layers/SatelliteLayer';
 import { DocksLayer } from './layers/DocksLayer';
 import { BorderHighlightLayer } from './layers/BorderHighlightLayer';
+import { SatelliteImageryLayer } from './layers/SatelliteImageryLayer';
 import { NewsLayer } from './layers/NewsLayer';
 import { Suspense } from 'react';
 import { COLORS, CAMERA } from '@/config/constants';
@@ -47,24 +48,31 @@ export function Scene() {
         style={{ width: '100%', height: '100%', touchAction: 'none' }}
       >
         <color attach="background" args={[COLORS.BG_DARK]} />
-        <PerspectiveCamera makeDefault position={[0, 0, CAMERA.DEFAULT_DISTANCE]} fov={60} />
+        <PerspectiveCamera makeDefault position={[0, 0, CAMERA.DEFAULT_DISTANCE]} fov={60} near={0.01} far={10} />
         <AdaptiveDpr pixelated />
         <Suspense fallback={<LoadingFallback />}>
           {/* Base layers */}
           <Globe />
-          <CountryBorders />
-          <Layer id="border_highlight">
+          <Layer id="satellite_imagery">
+            <SatelliteImageryLayer />
+          </Layer>
+          <Layer id="borders">
+            <CountryBorders />
             <BorderHighlightLayer />
           </Layer>
 
           {/* Infrastructure layers */}
-          <AirportsLayer />
+          <Layer id="airports">
+            <AirportsLayer />
+          </Layer>
           <Layer id="docks">
             <DocksLayer />
           </Layer>
 
           {/* Traffic layers — entities only render in viewport via useLayerData */}
-          <AircraftLayerInstanced />
+          <Layer id="aircraft">
+            <AircraftLayerInstanced />
+          </Layer>
           <Layer id="maritime">
             <MaritimeLayer />
           </Layer>

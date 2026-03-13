@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { EntityRef } from '@/types/entities';
 import { UI } from '@/config/constants';
-import { LayerId, LayerState, getInitialLayerStates } from '@/types/layers';
+import { LayerId, LayerState, getInitialLayerStates, LAYER_CONFIGS } from '@/types/layers';
 
 // ============================================================================
 // DATA INTERFACES
@@ -78,6 +78,16 @@ interface Airport {
   elevation: number;
   type: 'large_airport' | 'medium_airport' | 'small_airport' | 'heliport' | 'seaplane_base' | 'closed';
   scheduled_service: boolean;
+}
+
+// ============================================================================
+// BORDER HIGHLIGHTING
+// ============================================================================
+
+interface HighlightEntry {
+  code: string;          // ISO 3166-1 alpha-3 (e.g. "UKR")
+  color: string;         // hex color
+  reason: 'selected' | 'conflict' | 'ally' | 'news' | 'manual';
 }
 
 // ============================================================================
@@ -170,9 +180,9 @@ interface Store {
   locationReady: boolean;
   setLocationReady: (ready: boolean) => void;
   
-  // Intro animation phases: 'loading' -> 'borders' -> 'airports' -> 'aircraft' -> 'complete'
-  introPhase: 'loading' | 'borders' | 'airports' | 'aircraft' | 'complete';
-  setIntroPhase: (phase: 'loading' | 'borders' | 'airports' | 'aircraft' | 'complete') => void;
+  // Intro animation phases: 'loading' -> 'borders' -> 'airports' -> 'docks' -> 'maritime' -> 'aircraft' -> 'satellites' -> 'complete'
+  introPhase: 'loading' | 'borders' | 'airports' | 'docks' | 'maritime' | 'aircraft' | 'satellites' | 'complete';
+  setIntroPhase: (phase: 'loading' | 'borders' | 'airports' | 'docks' | 'maritime' | 'aircraft' | 'satellites' | 'complete') => void;
 
   // Loading progress (0-100) for syncing animations
   loadingProgress: number;
@@ -189,9 +199,16 @@ interface Store {
   layerEntities: Record<string, any[]>; // eslint-disable-line @typescript-eslint/no-explicit-any
   setLayerEntities: (layerId: LayerId, entities: any[]) => void; // eslint-disable-line @typescript-eslint/no-explicit-any
   getLayerEntities: (layerId: LayerId) => any[]; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+  // Border highlighting
+  highlightedCountries: HighlightEntry[];
+  setHighlightedCountries: (entries: HighlightEntry[]) => void;
+  addHighlightedCountry: (entry: HighlightEntry) => void;
+  removeHighlightedCountry: (code: string) => void;
+  toggleHighlightedCountry: (code: string, color?: string, reason?: HighlightEntry['reason']) => void;
 }
 
-export type { Aircraft, Position, TrackWaypoint, FlightTrack, ViewportBounds, Airport, ViewMode };
+export type { Aircraft, Position, TrackWaypoint, FlightTrack, ViewportBounds, Airport, ViewMode, HighlightEntry };
 export type { LayerId, LayerState };
 
 // ============================================================================
@@ -385,8 +402,6 @@ export const useRadarStore = create<Store>((set, get) => ({
       return;
     }
     
-    const isMockAircraft = icao24.startsWith('mock_');
-    
     const newTracks = new Map(flightTracks);
     newTracks.set(icao24, {
       icao24,
@@ -398,57 +413,7 @@ export const useRadarStore = create<Store>((set, get) => ({
       isLoading: true,
     });
     set({ flightTracks: newTracks });
-    
-    if (isMockAircraft) {
-      const mockAircraft = aircraft.find(a => a.id === icao24);
-      if (mockAircraft) {
-        const waypoints: TrackWaypoint[] = [];
-        const { latitude, longitude, altitude, heading, speed } = mockAircraft.position;
-        
-        const now = Date.now();
-        const waypointCount = 20;
-        const totalMinutes = 30;
-        
-        for (let i = waypointCount; i >= 0; i--) {
-          const minutesAgo = (i / waypointCount) * totalMinutes;
-          const time = now - minutesAgo * 60 * 1000;
-          
-          const speedDegPerMin = (speed / 60) / 60;
-          const distance = speedDegPerMin * minutesAgo;
-          
-          const reverseHeadingRad = ((heading + 180) % 360) * (Math.PI / 180);
-          
-          const jitter = (Math.random() - 0.5) * 0.02;
-          const pastLat = latitude + distance * Math.cos(reverseHeadingRad) + jitter;
-          const pastLon = longitude + distance * Math.sin(reverseHeadingRad) + jitter;
-          
-          const altVariation = (Math.random() - 0.5) * 2000;
-          const pastAlt = Math.max(5000, altitude + altVariation * (minutesAgo / totalMinutes));
-          
-          waypoints.push({
-            time: Math.floor(time / 1000),
-            latitude: Math.max(-90, Math.min(90, pastLat)),
-            longitude: ((pastLon + 180) % 360) - 180,
-            altitude: pastAlt,
-            heading: heading + (Math.random() - 0.5) * 5,
-          });
-        }
-        
-        const updatedTracks = new Map(get().flightTracks);
-        updatedTracks.set(icao24, {
-          icao24,
-          callsign: mockAircraft.callsign,
-          startTime: Math.floor((now - totalMinutes * 60 * 1000) / 1000),
-          endTime: Math.floor(now / 1000),
-          waypoints,
-          fetchedAt: Date.now(),
-          isLoading: false,
-        });
-        set({ flightTracks: updatedTracks });
-        return;
-      }
-    }
-    
+
     try {
       const res = await fetch(`https://opensky-network.org/api/tracks/all?icao24=${icao24}&time=0`, {
         headers: { 'Accept': 'application/json' },
@@ -527,12 +492,15 @@ export const useRadarStore = create<Store>((set, get) => ({
   layers: getInitialLayerStates(),
 
   toggleLayer: (id) => {
+    const newEnabled = !get().layers[id].enabled;
     set((s) => ({
       layers: {
         ...s.layers,
-        [id]: { ...s.layers[id], enabled: !s.layers[id].enabled },
+        [id]: { ...s.layers[id], enabled: newEnabled },
       },
     }));
+    const label = LAYER_CONFIGS[id]?.shortLabel ?? id.toUpperCase();
+    get().showToast(`${label} ${newEnabled ? 'ON' : 'OFF'}`);
   },
 
   setLayerEnabled: (id, enabled) => {
@@ -565,6 +533,30 @@ export const useRadarStore = create<Store>((set, get) => ({
   },
 
   getLayerEntities: (layerId) => get().layerEntities[layerId] ?? [],
+
+  // Border highlighting
+  highlightedCountries: [],
+
+  setHighlightedCountries: (entries) => set({ highlightedCountries: entries }),
+
+  addHighlightedCountry: (entry) => set((s) => ({
+    highlightedCountries: s.highlightedCountries.some(h => h.code === entry.code)
+      ? s.highlightedCountries.map(h => h.code === entry.code ? entry : h)
+      : [...s.highlightedCountries, entry],
+  })),
+
+  removeHighlightedCountry: (code) => set((s) => ({
+    highlightedCountries: s.highlightedCountries.filter(h => h.code !== code),
+  })),
+
+  toggleHighlightedCountry: (code, color = '#ffaa00', reason = 'manual') => set((s) => {
+    const exists = s.highlightedCountries.some(h => h.code === code);
+    return {
+      highlightedCountries: exists
+        ? s.highlightedCountries.filter(h => h.code !== code)
+        : [...s.highlightedCountries, { code, color, reason }],
+    };
+  }),
 
   fetchAirports: async () => {
     const { airports, airportsLoading } = get();

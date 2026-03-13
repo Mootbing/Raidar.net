@@ -83,16 +83,16 @@ export const TEXT_STYLE = {
 // =============================================================================
 
 export const BG = {
-  DARK: 'bg-black',
-  OVERLAY: 'bg-black/80',
-  GLASS: 'bg-black/30',
-  ELEVATED: 'bg-[#111]',
-  HOVER: 'bg-[#222]',
-  
+  DARK: 'bg-black/40 backdrop-blur-md',
+  OVERLAY: 'bg-black/40 backdrop-blur-md',
+  GLASS: 'bg-black/20 backdrop-blur-md',
+  ELEVATED: 'bg-white/5 backdrop-blur-md',
+  HOVER: 'bg-white/10 backdrop-blur-md',
+
   // With backdrop blur
-  GLASS_BLUR: 'bg-black/30 backdrop-blur-md',
-  OVERLAY_BLUR: 'bg-black/80 backdrop-blur-sm',
-  PANEL_BLUR: 'bg-black/95 backdrop-blur-sm',
+  GLASS_BLUR: 'bg-black/20 backdrop-blur-md',
+  OVERLAY_BLUR: 'bg-black/30 backdrop-blur-md',
+  PANEL_BLUR: 'bg-black/30 backdrop-blur-md',
 } as const;
 
 // =============================================================================
@@ -100,19 +100,19 @@ export const BG = {
 // =============================================================================
 
 export const BORDER = {
-  DEFAULT: 'border-[#333]',
-  SUBTLE: 'border-[#1a1a1a]',
-  FOCUS: 'border-[#00ff88]/50',
-  ACCENT: 'border-[#00ff88]',
-  ACCENT_BLUE: 'border-[#66aaff]/50',
-  
+  DEFAULT: 'border-white/10',
+  SUBTLE: 'border-white/5',
+  FOCUS: 'border-[#00ff88]/30',
+  ACCENT: 'border-[#00ff88]/40',
+  ACCENT_BLUE: 'border-[#66aaff]/30',
+
   // Full border
-  PANEL: 'border border-[#333]',
-  PANEL_SUBTLE: 'border border-[#1a1a1a]',
-  
+  PANEL: 'border border-white/10',
+  PANEL_SUBTLE: 'border border-white/5',
+
   // Dividers
-  DIVIDER: 'border-t border-[#1a1a1a]',
-  DIVIDER_B: 'border-b border-[#1a1a1a]',
+  DIVIDER: 'border-t border-white/5',
+  DIVIDER_B: 'border-b border-white/5',
 } as const;
 
 // =============================================================================
@@ -129,11 +129,11 @@ export const COMPONENT = {
   
   // Buttons
   BUTTON: `${TEXT.PRIMARY} ${TEXT.BASE} ${TEXT.TRACKING} ${BG.ELEVATED} ${BORDER.PANEL} px-3 py-1.5 transition-all duration-200`,
-  BUTTON_HOVER: 'hover:bg-[#222] hover:border-[#444]',
-  
+  BUTTON_HOVER: 'hover:bg-white/10 hover:border-white/20',
+
   // Input fields
   INPUT: `${BG.DARK} ${TEXT.PRIMARY} ${TEXT.MONO} ${BORDER.PANEL} px-3 py-2 outline-none placeholder:${TEXT.MUTED}`,
-  INPUT_FOCUS: 'focus:border-[#00ff88]/50',
+  INPUT_FOCUS: 'focus:border-[#00ff88]/30',
   
   // Toast notifications
   TOAST: `${BG.OVERLAY_BLUR} ${BORDER.PANEL} px-4 py-2 ${TEXT.XS} ${TEXT.PRIMARY} ${TEXT.TRACKING}`,
@@ -152,7 +152,6 @@ export const ANIMATION = {
   FADE_OUT: 'animate-fadeOut',
   SLIDE_UP: 'animate-slideUp',
   SLIDE_DOWN: 'animate-slideDown',
-  PULSE: 'animate-pulse',
   
   // Transitions
   TRANSITION_FAST: 'transition-all duration-150 ease-out',

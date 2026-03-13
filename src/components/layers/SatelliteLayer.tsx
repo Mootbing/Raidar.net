@@ -1,12 +1,13 @@
 'use client';
 
 import { useRef, useEffect, useMemo, useCallback } from 'react';
-import { useFrame, useThree } from '@react-three/fiber';
+import { useFrame, ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import * as satellite from 'satellite.js';
 import { useLayerData } from '@/hooks/useLayerData';
 import { useRadarStore } from '@/store/gameStore';
-import { GLOBE, COLORS } from '@/config/constants';
+import { GLOBE, COLORS, DOCKS } from '@/config/constants';
 
 /**
  * Satellite Overhead Layer
@@ -49,17 +50,26 @@ interface PropagatedSatellite {
 // Pre-allocated objects for render loop (avoid GC)
 const _dummy = new THREE.Object3D();
 const _color = new THREE.Color();
-const _raycaster = new THREE.Raycaster();
-const _mouse = new THREE.Vector2();
 
 const MAX_SATELLITE_INSTANCES = 5000;
 const SATELLITE_SIZE = 0.004;
+const SATELLITE_HITBOX_SIZE = 0.02; // Larger invisible hitbox for easier clicking
 const HOVER_SCALE = 2.0;
 const SELECTED_SCALE = 2.5;
-const PULSE_SPEED = 4;
-const SATELLITE_COLOR = COLORS.LAYER_SATELLITE;
-const SATELLITE_HOVER_COLOR = '#ffffff';
-const SATELLITE_SELECTED_COLOR = '#00ddff';
+const SATELLITE_COLOR = COLORS.SATELLITE_DEFAULT;
+const SATELLITE_HOVER_COLOR = COLORS.SATELLITE_HOVERED;
+const SATELLITE_SELECTED_COLOR = COLORS.SATELLITE_SELECTED;
+
+/** Two overlapping rectangles rotated 45° to form a star/cross shape */
+function createSatelliteStarGeometry(size: number): THREE.BufferGeometry {
+  const w = size;
+  const h = size * 2.5;
+  const rect1 = new THREE.PlaneGeometry(w, h);
+  const rect2 = new THREE.PlaneGeometry(w, h);
+  rect2.rotateZ(Math.PI / 4);
+  rect1.rotateZ(-Math.PI / 4);
+  return mergeGeometries([rect1, rect2])!;
+}
 
 /** Classify orbit type from altitude (km) */
 function classifyOrbit(altKm: number, inclination: number): string {
@@ -80,14 +90,19 @@ function periodFromMeanMotion(meanMotion: number): number {
 
 export function SatelliteLayer() {
   const meshRef = useRef<THREE.InstancedMesh>(null);
+  const hitboxRef = useRef<THREE.InstancedMesh>(null);
+  const starGeometry = useMemo(() => createSatelliteStarGeometry(SATELLITE_SIZE), []);
   const rawSatellites = useLayerData<RawSatellite>('satellites');
   const setLayerEntities = useRadarStore((s) => s.setLayerEntities);
   const hoverEntity = useRadarStore((s) => s.hoverEntity);
   const selectEntity = useRadarStore((s) => s.selectEntity);
   const hoveredEntity = useRadarStore((s) => s.gameState.hoveredEntity);
   const selectedEntity = useRadarStore((s) => s.gameState.selectedEntity);
-  const activeMode = useRadarStore((s) => s.gameState.activeMode);
-  const { camera, gl } = useThree();
+  const introPhase = useRadarStore((s) => s.introPhase);
+
+  // Sweep animation state
+  const satAnimationTime = useRef(0);
+  const satAnimationStarted = useRef(false);
 
   // Parse TLE data into satrec objects (memoized — only recomputes when TLE data changes)
   const satRecords = useMemo(() => {
@@ -113,88 +128,64 @@ export function SatelliteLayer() {
 
   // Store propagated satellites for entity lookups
   const propagatedRef = useRef<PropagatedSatellite[]>([]);
+  const materialNeedsRecompile = useRef(true);
+
+  // Index-to-ID mapping for hitbox events
+  const indexToIdRef = useRef<string[]>([]);
 
   // Update layer entities in store for search/selection
   const updateStoreEntities = useCallback(() => {
     setLayerEntities('satellites', propagatedRef.current);
   }, [setLayerEntities]);
 
-  // Mouse interaction
-  const hoveredIndexRef = useRef<number>(-1);
+  // Pointer event handlers (R3F events on hitbox mesh)
+  const handlePointerOver = useCallback((e: ThreeEvent<PointerEvent>) => {
+    e.stopPropagation();
+    if (e.instanceId !== undefined && e.instanceId < indexToIdRef.current.length) {
+      hoverEntity({ type: 'satellite', id: indexToIdRef.current[e.instanceId] });
+    }
+  }, [hoverEntity]);
 
-  useEffect(() => {
-    const canvas = gl.domElement;
+  const handlePointerOut = useCallback(() => {
+    hoverEntity(null);
+  }, [hoverEntity]);
 
-    const onPointerMove = (event: PointerEvent) => {
-      if (activeMode !== 'all' && activeMode !== 'satellite') return;
-      if (!meshRef.current || propagatedRef.current.length === 0) return;
-
-      const rect = canvas.getBoundingClientRect();
-      _mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      _mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-      _raycaster.setFromCamera(_mouse, camera);
-      const intersects = _raycaster.intersectObject(meshRef.current, false);
-
-      if (intersects.length > 0 && intersects[0].instanceId !== undefined) {
-        const idx = intersects[0].instanceId;
-        if (idx < propagatedRef.current.length) {
-          hoveredIndexRef.current = idx;
-          const sat = propagatedRef.current[idx];
-          hoverEntity({ type: 'satellite', id: sat.id });
-          return;
-        }
-      }
-
-      // Only clear hover if currently hovering a satellite
-      if (hoveredEntity?.type === 'satellite') {
-        hoveredIndexRef.current = -1;
-        hoverEntity(null);
-      }
-    };
-
-    const onClick = (event: MouseEvent) => {
-      if (activeMode !== 'all' && activeMode !== 'satellite') return;
-      if (!meshRef.current || propagatedRef.current.length === 0) return;
-
-      const rect = canvas.getBoundingClientRect();
-      _mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      _mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-      _raycaster.setFromCamera(_mouse, camera);
-      const intersects = _raycaster.intersectObject(meshRef.current, false);
-
-      if (intersects.length > 0 && intersects[0].instanceId !== undefined) {
-        const idx = intersects[0].instanceId;
-        if (idx < propagatedRef.current.length) {
-          const sat = propagatedRef.current[idx];
-          selectEntity({ type: 'satellite', id: sat.id });
-        }
-      }
-    };
-
-    canvas.addEventListener('pointermove', onPointerMove);
-    canvas.addEventListener('click', onClick);
-    return () => {
-      canvas.removeEventListener('pointermove', onPointerMove);
-      canvas.removeEventListener('click', onClick);
-    };
-  }, [camera, gl, hoverEntity, selectEntity, hoveredEntity, activeMode]);
+  const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
+    e.stopPropagation();
+    if (e.instanceId !== undefined && e.instanceId < indexToIdRef.current.length) {
+      selectEntity({ type: 'satellite', id: indexToIdRef.current[e.instanceId] });
+    }
+  }, [selectEntity]);
 
   // Propagate all satellites and render per frame
-  useFrame(({ clock }) => {
+  useFrame((_, delta) => {
     if (!meshRef.current || satRecords.length === 0) return;
 
-    // Ensure bounding sphere covers globe + orbit altitudes for reliable raycasting
-    if (!meshRef.current.boundingSphere) {
-      meshRef.current.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 2);
+    // Ensure hitbox bounding sphere covers orbital range for reliable raycasting
+    if (hitboxRef.current && !hitboxRef.current.boundingSphere) {
+      hitboxRef.current.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), GLOBE.SATELLITE_MAX_ALTITUDE + 0.1);
+    }
+
+    // Start sweep animation when satellites phase begins
+    // If intro is already complete (re-toggle), skip animation entirely
+    if (introPhase === 'satellites' || introPhase === 'complete') {
+      if (!satAnimationStarted.current) {
+        satAnimationStarted.current = true;
+        // Skip sweep if intro already done (layer was toggled off/on)
+        satAnimationTime.current = introPhase === 'complete'
+          ? DOCKS.FADE_IN_STAGGER_DURATION * 0.5
+          : 0;
+      }
+    }
+    if (satAnimationStarted.current) {
+      satAnimationTime.current += delta;
     }
 
     const now = new Date();
     const gmst = satellite.gstime(now);
-    const t = clock.getElapsedTime();
 
     const propagated: PropagatedSatellite[] = [];
+    const ids: string[] = [];
     let visibleCount = 0;
 
     for (let i = 0; i < satRecords.length; i++) {
@@ -243,6 +234,7 @@ export function SatelliteLayer() {
         };
 
         propagated.push(sat);
+        ids.push(raw.id);
 
         // Position on globe
         const phi = (90 - lat) * (Math.PI / 180);
@@ -263,20 +255,36 @@ export function SatelliteLayer() {
         // Point toward Earth center
         _dummy.lookAt(0, 0, 0);
 
+        // Sweep animation: stagger by index
+        const staggerDelay = (i / Math.max(1, satRecords.length)) * DOCKS.FADE_IN_STAGGER_DURATION;
+        const individualTime = Math.max(0, satAnimationTime.current - staggerDelay);
+        const sweepProgress = satAnimationStarted.current ? Math.min(1, individualTime / DOCKS.RIPPLE_DURATION) : 0;
+        // Ease-out for smooth pop-in
+        const sweepEased = sweepProgress < 1 ? 1 - Math.pow(1 - sweepProgress, 3) : 1;
+        const sweepScale = satAnimationStarted.current ? (sweepProgress <= 0 ? 0 : sweepEased) : 0;
+
         // Determine scale based on hover/selection state
         const isHovered = hoveredEntity?.type === 'satellite' && hoveredEntity.id === raw.id;
         const isSelected = selectedEntity?.type === 'satellite' && selectedEntity.id === raw.id;
 
-        let scale = 1;
+        let scale = sweepScale;
         if (isSelected) {
-          scale = SELECTED_SCALE + Math.sin(t * PULSE_SPEED) * 0.3;
+          scale *= SELECTED_SCALE;
         } else if (isHovered) {
-          scale = HOVER_SCALE;
+          scale *= HOVER_SCALE;
         }
 
+        // Update visible mesh
         _dummy.scale.setScalar(scale);
         _dummy.updateMatrix();
         meshRef.current.setMatrixAt(visibleCount, _dummy.matrix);
+
+        // Update hitbox mesh with same position but fixed larger scale
+        if (hitboxRef.current) {
+          _dummy.scale.setScalar(sweepScale > 0 ? 1 : 0);
+          _dummy.updateMatrix();
+          hitboxRef.current.setMatrixAt(visibleCount, _dummy.matrix);
+        }
 
         // Color based on state
         if (isSelected) {
@@ -298,10 +306,22 @@ export function SatelliteLayer() {
     meshRef.current.instanceMatrix.needsUpdate = true;
     if (meshRef.current.instanceColor) {
       meshRef.current.instanceColor.needsUpdate = true;
+      // Force shader recompile after instanceColor is first created
+      if (materialNeedsRecompile.current) {
+        (meshRef.current.material as THREE.MeshBasicMaterial).needsUpdate = true;
+        materialNeedsRecompile.current = false;
+      }
     }
 
-    // Update propagated reference for entity lookups & mouse interaction
+    // Update hitbox mesh count
+    if (hitboxRef.current) {
+      hitboxRef.current.count = visibleCount;
+      hitboxRef.current.instanceMatrix.needsUpdate = true;
+    }
+
+    // Update propagated reference for entity lookups
     propagatedRef.current = propagated;
+    indexToIdRef.current = ids;
   });
 
   // Periodically sync propagated data to store (not every frame — every 2s)
@@ -315,16 +335,35 @@ export function SatelliteLayer() {
 
   return (
     <group>
+      {/* Invisible hitbox mesh for pointer detection (larger geometry) */}
       <instancedMesh
-        ref={meshRef}
+        ref={hitboxRef}
         args={[undefined, undefined, MAX_SATELLITE_INSTANCES]}
+        onPointerOver={handlePointerOver}
+        onPointerOut={handlePointerOut}
+        onClick={handleClick}
         frustumCulled={false}
       >
-        <octahedronGeometry args={[SATELLITE_SIZE, 0]} />
+        <sphereGeometry args={[SATELLITE_HITBOX_SIZE, 6, 4]} />
         <meshBasicMaterial
-          vertexColors
           transparent
-          opacity={0.9}
+          opacity={0}
+          side={THREE.DoubleSide}
+          depthWrite={false}
+        />
+      </instancedMesh>
+
+      {/* Visible instanced mesh - raycast disabled, hitbox handles events */}
+      <instancedMesh
+        ref={meshRef}
+        args={[starGeometry, undefined, MAX_SATELLITE_INSTANCES]}
+        frustumCulled={false}
+        raycast={() => null}
+      >
+        <meshBasicMaterial
+          transparent
+          opacity={1.0}
+          side={THREE.DoubleSide}
           depthWrite={false}
         />
       </instancedMesh>

@@ -70,7 +70,7 @@ export function getRegisteredLayers(): LayerId[] {
 
 /**
  * Aircraft — OpenSky Network
- * Already handled by DataPoller.tsx (has mock data, debug aircraft, etc.)
+ * Already handled by DataPoller.tsx (viewport-based lazy loading from Postgres)
  * Registered here so the orchestrator docs can reference the pattern,
  * but DataPoller still owns the fetch loop for aircraft.
  */

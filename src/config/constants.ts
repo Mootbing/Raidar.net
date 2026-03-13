@@ -9,7 +9,7 @@
 
 export const CAMERA = {
   // Distance limits
-  MIN_DISTANCE: 1.15,
+  MIN_DISTANCE: 1.05,
   MAX_DISTANCE: 5,
   DEFAULT_DISTANCE: 2.5,
   CITY_ZOOM_DISTANCE: 1.15,
@@ -30,6 +30,17 @@ export const CAMERA = {
   // Animation
   SLANT_ANGLE: 0.4,
   YAW_SPEED: 0.4,
+
+  // View modes (camera tracking for selected aircraft)
+  VIEW_CHASE_DISTANCE: 0.05,
+  VIEW_CHASE_HEIGHT: 0.015,
+  VIEW_COCKPIT_HEIGHT: 0.002,
+  VIEW_COCKPIT_LOOK_AHEAD: 0.04,
+  VIEW_TOP_HEIGHT: 0.06,
+  VIEW_ORBIT_DISTANCE: 0.05,
+  VIEW_ORBIT_HEIGHT: 0.015,
+  VIEW_ORBIT_SPEED: 0.5,
+  VIEW_LERP_SPEED: 4,
 } as const;
 
 // =============================================================================
@@ -37,7 +48,7 @@ export const CAMERA = {
 // =============================================================================
 
 export const LOCATIONS = {
-  DEFAULT: { lat: 40.7128, lon: -74.006 },
+  DEFAULT: { lat: 33.0, lon: 44.0 }, // Middle East (Iraq center)
 } as const;
 
 // =============================================================================
@@ -48,6 +59,7 @@ export const GLOBE = {
   ALTITUDE_SCALE: 0.0000005,
   AIRPORT_SURFACE_OFFSET: 1.001,
   DOCK_SURFACE_OFFSET: 1.001,
+  SATELLITE_IMAGERY_OFFSET: 1.001,
   BORDER_SURFACE_OFFSET: 1.002,
   BORDER_HIGHLIGHT_OFFSET: 1.003,
   NEWS_SURFACE_OFFSET: 1.004,
@@ -89,8 +101,6 @@ export const AIRCRAFT = {
   // Scaling
   SCALE_SELECTED: 1.8,
   SCALE_HOVERED: 1.6,
-  PULSE_SPEED: 5,
-  PULSE_AMPLITUDE: 0.15,
   ZOOM_SCALE_FACTOR: 5,
   ZOOM_SCALE_MIN: 0.2,
   ZOOM_SCALE_MAX: 1.2,
@@ -115,7 +125,7 @@ export const AIRPORTS = {
   SMALL_AIRPORT_FADE_DISTANCE: 1.25,
   SMALL_AIRPORT_FADE_SPEED: 3,
   SMALL_AIRPORT_MAX_OPACITY: 0.5,
-  LARGE_AIRPORT_MAX_OPACITY: 0.9,
+  LARGE_AIRPORT_MAX_OPACITY: 1,
   
   // Animation - diagonal sweep from top-left to bottom-right
   FADE_IN_STAGGER_DURATION: 2.5,    // Total duration for nth-child style stagger across all airports
@@ -124,6 +134,36 @@ export const AIRPORTS = {
   RIPPLE_MIN_SCALE: 0.1,            // Start barely visible
   RIPPLE_MIN_OPACITY: 0.2,          // Start low opacity
   OPACITY_SMOOTH_FACTOR: 4,
+} as const;
+
+// =============================================================================
+// DOCK / PORT RENDERING
+// =============================================================================
+
+export const DOCKS = {
+  // Geometry sizes
+  MARKER_SIZE: 0.002,
+
+  // Visibility
+  MAX_OPACITY: 0.85,
+  SMALL_PORT_FADE_DISTANCE: 1.35,   // Small ports fade at this camera distance
+  SMALL_PORT_FADE_SPEED: 3,
+
+  // Animation - diagonal sweep (same pattern as airports)
+  FADE_IN_STAGGER_DURATION: 2.5,
+  RIPPLE_DURATION: 0.6,
+  RIPPLE_OVERSHOOT: 2.2,
+  RIPPLE_MIN_SCALE: 0.1,
+  RIPPLE_MIN_OPACITY: 0.2,
+  OPACITY_SMOOTH_FACTOR: 4,
+
+  // Colors — all docks render blue; hover overrides
+  COLOR_CONTAINER: '#4488ff',
+  COLOR_BULK: '#4488ff',
+  COLOR_NAVAL: '#4488ff',
+  COLOR_OIL_TERMINAL: '#4488ff',
+  COLOR_MIXED: '#4488ff',
+  COLOR_HOVERED: '#00ff66',
 } as const;
 
 // =============================================================================
@@ -339,6 +379,35 @@ export const COLORS = {
   GLOBE_SURFACE: '#000000',
   BORDERS_LINE: '#ffffff',
   FLIGHT_PATH: '#00ff88',
+
+  // Military
+  MILITARY: '#ff4444',
+
+  // Satellites
+  SATELLITE_DEFAULT: '#ff69b4',
+  SATELLITE_HOVERED: '#ffb6c1',
+  SATELLITE_SELECTED: '#ff1493',
+
+  // Maritime
+  MARITIME_DEFAULT: '#66aaff',
+  MARITIME_SELECTED: '#00ff88',
+  MARITIME_HOVERED: '#ffcc00',
+  MARITIME_MILITARY: '#ff4444',
+
+  // News severity
+  NEWS_LOW: '#00ff88',
+  NEWS_MEDIUM: '#ffcc00',
+  NEWS_HIGH: '#ff8800',
+  NEWS_CRITICAL: '#ff2222',
+
+  // AI mode bar
+  MODE_AI_AGENT: { active: '#ff4444', inactive: '#442222', highlighted: '#ff6666' },
+  MODE_AI_PLAN: { active: '#ffaa00', inactive: '#443300', highlighted: '#ffcc33' },
+  MODE_AI_ASK: { active: '#00cc66', inactive: '#224422', highlighted: '#33ff88' },
+
+  // Misc
+  TILE_MISSING: '#0a0a12',
+  HITBOX: '#ffffff',
 } as const;
 
 // =============================================================================

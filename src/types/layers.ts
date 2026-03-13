@@ -9,7 +9,7 @@
  */
 export type LayerId =
   | 'borders'
-  | 'border_highlight'
+  | 'satellite_imagery'
   | 'airports'
   | 'aircraft'
   | 'maritime'
@@ -64,16 +64,16 @@ export const LAYER_CONFIGS: Record<LayerId, LayerConfig> = {
     category: 'base',
     description: 'Political boundaries and country borders',
   },
-  border_highlight: {
-    id: 'border_highlight',
-    label: 'BORDER HIGHLIGHT',
-    shortLabel: 'HIGHLIGHT',
-    icon: '◆',
-    color: '#ffaa00',
+  satellite_imagery: {
+    id: 'satellite_imagery',
+    label: 'SATELLITE IMAGERY',
+    shortLabel: 'IMAGERY',
+    icon: '◉',
+    color: '#44aaff',
     defaultEnabled: false,
-    lazy: false,
+    lazy: true,
     category: 'base',
-    description: 'Highlight specific country or region borders',
+    description: 'Earth satellite imagery overlay on globe',
   },
   airports: {
     id: 'airports',
@@ -115,7 +115,7 @@ export const LAYER_CONFIGS: Record<LayerId, LayerConfig> = {
     icon: '◎',
     color: '#ff66aa',
     defaultEnabled: true,
-    lazy: false,
+    lazy: true,
     category: 'traffic',
     description: 'Overhead satellite positions and orbital tracks',
   },
@@ -125,7 +125,7 @@ export const LAYER_CONFIGS: Record<LayerId, LayerConfig> = {
     shortLabel: 'DOCKS',
     icon: '⊞',
     color: '#88ccff',
-    defaultEnabled: false,
+    defaultEnabled: true,
     lazy: false,
     category: 'infrastructure',
     description: 'Major ports and shipping terminals',

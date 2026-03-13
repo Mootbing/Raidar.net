@@ -67,7 +67,7 @@ export function LayerPanel({ isOpen, onClose }: { isOpen: boolean; onClose: () =
         onClick={onClose}
         className={`${TEXT.XS} ${TEXT.DIMMED} mt-1 hover:text-white/50 transition-colors`}
       >
-        [ESC] CLOSE
+        [/] CLOSE
       </button>
     </div>
   );

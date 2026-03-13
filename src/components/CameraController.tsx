@@ -5,10 +5,39 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { useRadarStore } from '@/store/gameStore';
-import { CAMERA, LOCATIONS, INPUT, AIRPORTS, INTRO } from '@/config/constants';
+import { CAMERA, LOCATIONS, INPUT, AIRPORTS } from '@/config/constants';
 import { useCanvasInput, useInputState } from '@/hooks/useInputManager';
 import { InputAction } from '@/lib/inputManager';
-import { latLonToVector3 } from '@/utils/geo';
+import { latLonToVector3, predictPosition } from '@/utils/geo';
+
+/** Compute local tangent frame at a lat/lon with heading on globe surface */
+function getLocalFrame(lat: number, lon: number, heading: number) {
+  const pos = latLonToVector3(lat, lon, 0);
+  const up = pos.clone().normalize();
+
+  const latRad = lat * (Math.PI / 180);
+  const lonRad = lon * (Math.PI / 180);
+
+  const north = new THREE.Vector3(
+    Math.sin(latRad) * Math.cos(lonRad + Math.PI),
+    Math.cos(latRad),
+    -Math.sin(latRad) * Math.sin(lonRad + Math.PI)
+  ).normalize();
+
+  north.sub(up.clone().multiplyScalar(north.dot(up))).normalize();
+  const east = new THREE.Vector3().crossVectors(up, north).normalize();
+  north.crossVectors(east, up).normalize();
+
+  const headingRad = heading * (Math.PI / 180);
+  const forward = new THREE.Vector3()
+    .addScaledVector(north, Math.cos(headingRad))
+    .addScaledVector(east, Math.sin(headingRad))
+    .normalize();
+
+  const right = new THREE.Vector3().crossVectors(forward, up).normalize();
+
+  return { pos, up, forward, right };
+}
 
 export function CameraController() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -21,9 +50,6 @@ export function CameraController() {
   // activeMode is accessed via getState() in findNearestEntity/findEntityInDirection to avoid stale closures
   const aircraft = useRadarStore((state) => state.aircraft);
   const airports = useRadarStore((state) => state.airports);
-  const setLocationReady = useRadarStore((state) => state.setLocationReady);
-  const setIntroPhase = useRadarStore((state) => state.setIntroPhase);
-  const setLoadingProgress = useRadarStore((state) => state.setLoadingProgress);
   const hoverEntity = useRadarStore((state) => state.hoverEntity);
   const setFocusLocation = useRadarStore((state) => state.setFocusLocation);
   
@@ -62,9 +88,8 @@ export function CameraController() {
   } | null>(null);
   const isReturningToEarth = useRef(false);
   const hasInitializedLocation = useRef(false);
-  const [initialLocation, setInitialLocation] = useState<{ lat: number; lon: number } | null>(null);
   const [controlsReady, setControlsReady] = useState(false);
-  
+
   // Mark controls as ready when ref is set (check on each frame until ready)
   useFrame(() => {
     if (!controlsReady && controlsRef.current) {
@@ -85,7 +110,9 @@ export function CameraController() {
   
   // View mode cycling (Q/E when aircraft selected)
   const cycleViewMode = useRadarStore((s) => s.cycleViewMode);
-  
+  const viewMode = useRadarStore((s) => s.gameState.viewMode);
+  const prevViewMode = useRef(viewMode);
+
   // Helper to find nearest entity to camera center (respects activeMode)
   // Helper to check if a small airport is visible (based on camera distance)
   const isSmallAirportVisible = () => {
@@ -370,62 +397,22 @@ export function CameraController() {
   
   useCanvasInput(handleCanvasAction);
   
-  // Get user's location on mount
+  // Set initial camera position to default location (Middle East) immediately — no geolocation
   useEffect(() => {
     if (hasInitializedLocation.current) return;
+    if (!controlsReady || !controlsRef.current) return;
     hasInitializedLocation.current = true;
-    
-    if (typeof navigator !== 'undefined' && navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setInitialLocation({
-            lat: position.coords.latitude,
-            lon: position.coords.longitude,
-          });
-        },
-        () => {
-          // Permission denied or error - use NYC
-          setInitialLocation(LOCATIONS.DEFAULT);
-        },
-        { timeout: 5000, enableHighAccuracy: false }
-      );
-    } else {
-      // Geolocation not available - use NYC
-      setInitialLocation(LOCATIONS.DEFAULT);
-    }
-  }, []);
-  
-  // Initial location animation state
-  const initialLocationAnimating = useRef(false);
-  const initialLocationProgress = useRef(0);
-  const initialLocationStart = useRef(new THREE.Vector3());
-  const initialLocationTarget = useRef(new THREE.Vector3());
-  const airportsTriggered = useRef(false);
-  
-  // Set initial camera position when location is determined - animate instead of teleport
-  useEffect(() => {
-    if (!initialLocation || !controlsReady || !controlsRef.current) return;
-    
-    const targetPoint = latLonToVector3(initialLocation.lat, initialLocation.lon, 0);
+
+    const targetPoint = latLonToVector3(LOCATIONS.DEFAULT.lat, LOCATIONS.DEFAULT.lon, 0);
     const cameraDirection = targetPoint.clone().normalize();
-    const finalCameraPos = cameraDirection.clone().multiplyScalar(CAMERA.CITY_ZOOM_DISTANCE);
-    
-    // Store start and target for animation
-    initialLocationStart.current.copy(camera.position);
-    initialLocationTarget.current.copy(finalCameraPos);
-    initialLocationProgress.current = 0;
-    initialLocationAnimating.current = true;
-    
-    // Set target to globe center (0,0,0) for free rotation around the globe
+    const finalCameraPos = cameraDirection.clone().multiplyScalar(CAMERA.DEFAULT_DISTANCE);
+
+    // Teleport camera immediately — no animation
+    camera.position.copy(finalCameraPos);
     controlsRef.current.target.set(0, 0, 0);
     currentTarget.current.set(0, 0, 0);
-    
-    // Force loading progress to 100% to complete border drawing animation immediately
-    setLoadingProgress(100);
-    
-    // Signal that location is ready - allow data fetching to begin
-    setLocationReady(true);
-  }, [initialLocation, controlsReady, camera, setLocationReady, setLoadingProgress]);
+    controlsRef.current.update();
+  }, [controlsReady, camera]);
   
   // Focus on a specific location (from search, etc.) - flyover animation
   const prevFocusLocation = useRef<{ lat: number; lon: number } | null>(null);
@@ -628,10 +615,12 @@ export function CameraController() {
       isAnimating.current = true;
       isReturningToEarth.current = true;
       animationProgress.current = 0;
-      
-      // Clear chase view data
+
+      // Clear chase view data and restore normal camera state
       lastServerData.current = null;
       currentCameraOffset.current.set(0, 0, 0);
+      camera.up.set(0, 1, 0);
+      controlsRef.current.enabled = true;
       
       startPosition.current.copy(camera.position);
       startTarget.current.copy(controlsRef.current.target);
@@ -648,32 +637,44 @@ export function CameraController() {
     }
     
     prevSelectedId.current = selectedId;
-  }, [selectedId, aircraft, camera, initialLocation]);
-  
-  useFrame((_, delta) => {
-    if (!controlsRef.current) return;
-    
-    // Handle initial location lerp animation
-    if (initialLocationAnimating.current) {
-      initialLocationProgress.current += delta / INTRO.CAMERA_LERP_DURATION;
-      const t = Math.min(initialLocationProgress.current, 1);
-      // Ease out cubic for smooth deceleration
-      const eased = 1 - Math.pow(1 - t, 3);
-      
-      camera.position.lerpVectors(initialLocationStart.current, initialLocationTarget.current, eased);
-      controlsRef.current.update();
-      
-      // Trigger airports animation when lerp is 90% complete
-      if (t >= 0.9 && !airportsTriggered.current) {
-        airportsTriggered.current = true;
-        setIntroPhase('airports');
-      }
-      
-      if (t >= 1) {
-        initialLocationAnimating.current = false;
+  }, [selectedId, aircraft, camera]);
+
+  // Handle view mode changes for selected aircraft
+  useEffect(() => {
+    if (viewMode === prevViewMode.current) return;
+    prevViewMode.current = viewMode;
+
+    if (!selectedId || !controlsRef.current) return;
+
+    if (viewMode === 'focus') {
+      // Returning to focus view — animate camera back to overhead position
+      camera.up.set(0, 1, 0);
+      controlsRef.current.enabled = true;
+
+      const ac = aircraft.find(a => a.id === selectedId);
+      if (ac) {
+        isAnimating.current = true;
+        animationProgress.current = 0;
+        animationPhase.current = 'direct';
+
+        startPosition.current.copy(camera.position);
+        startTarget.current.copy(currentTarget.current);
+
+        const targetPoint = latLonToVector3(ac.position.latitude, ac.position.longitude, 0);
+        const cameraDirection = targetPoint.clone().normalize();
+        targetCameraPos.current.copy(cameraDirection.multiplyScalar(CAMERA.CITY_ZOOM_DISTANCE));
+        targetLookAt.current.set(0, 0, 0);
       }
     }
+  }, [viewMode, selectedId, aircraft, camera]);
+
+  useFrame((state, delta) => {
+    if (!controlsRef.current) return;
     
+    // Determine if in view-mode tracking (chase, cockpit, orbit, top)
+    const currentViewMode = selectedId ? useRadarStore.getState().gameState.viewMode : 'focus';
+    const isTrackingView = selectedId && currentViewMode !== 'focus' && !isAnimating.current && lastServerData.current !== null;
+
     if (isAnimating.current) {
       if (animationPhase.current === 'direct') {
         // Direct animation (no flyover)
@@ -724,12 +725,63 @@ export function CameraController() {
           animationPhase.current = 'direct';
         }
       }
+    } else if (isTrackingView) {
+      // View mode tracking — continuously follow selected aircraft
+      controlsRef.current.enabled = false;
+
+      const data = lastServerData.current!;
+      const elapsed = (Date.now() - data.time) / 1000;
+      const predicted = predictPosition(data.lat, data.lon, data.heading, data.speed, Math.min(elapsed, 120));
+      const { pos, up, forward, right } = getLocalFrame(predicted.lat, predicted.lon, data.heading);
+
+      let desiredCamPos: THREE.Vector3;
+      let desiredLookAt: THREE.Vector3;
+
+      switch (currentViewMode) {
+        case 'chase':
+          desiredCamPos = pos.clone()
+            .addScaledVector(up, CAMERA.VIEW_CHASE_HEIGHT)
+            .addScaledVector(forward, -CAMERA.VIEW_CHASE_DISTANCE);
+          desiredLookAt = pos;
+          break;
+        case 'cockpit':
+          desiredCamPos = pos.clone()
+            .addScaledVector(up, CAMERA.VIEW_COCKPIT_HEIGHT);
+          desiredLookAt = pos.clone()
+            .addScaledVector(forward, CAMERA.VIEW_COCKPIT_LOOK_AHEAD)
+            .addScaledVector(up, CAMERA.VIEW_COCKPIT_HEIGHT * 0.5);
+          break;
+        case 'orbit': {
+          const angle = state.clock.elapsedTime * CAMERA.VIEW_ORBIT_SPEED;
+          desiredCamPos = pos.clone()
+            .addScaledVector(up, CAMERA.VIEW_ORBIT_HEIGHT)
+            .addScaledVector(right, Math.cos(angle) * CAMERA.VIEW_ORBIT_DISTANCE)
+            .addScaledVector(forward, Math.sin(angle) * CAMERA.VIEW_ORBIT_DISTANCE);
+          desiredLookAt = pos;
+          break;
+        }
+        case 'top':
+        default:
+          desiredCamPos = pos.clone()
+            .addScaledVector(up, CAMERA.VIEW_TOP_HEIGHT);
+          desiredLookAt = pos;
+      }
+
+      const lerpFactor = Math.min(1, CAMERA.VIEW_LERP_SPEED * delta);
+      camera.position.lerp(desiredCamPos, lerpFactor);
+      currentTarget.current.lerp(desiredLookAt, lerpFactor);
+      camera.up.copy(up);
+      camera.lookAt(currentTarget.current);
     } else {
       // Normal view - enable standard controls
+      controlsRef.current.enabled = true;
       controlsRef.current.enableRotate = true;
       controlsRef.current.enableDamping = true;
     }
-    
+
+    // Skip input handling and controls update during view-mode tracking
+    if (isTrackingView) return;
+
     // Adjust rotation sensitivity based on zoom level
     const cameraDistance = camera.position.length();
     const zoomBasedRotateSpeed = Math.max(CAMERA.ROTATE_SPEED_MIN, Math.min(CAMERA.ROTATE_SPEED_MAX, (cameraDistance - 1) * INPUT.KEYBOARD.ROTATE_ZOOM_SCALE));

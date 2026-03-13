@@ -54,6 +54,12 @@ export function AircraftLayerInstanced() {
   const hoveredEntity = useRadarStore((state) => state.gameState.hoveredEntity);
   const selectedEntity = useRadarStore((state) => state.gameState.selectedEntity);
   const introPhase = useRadarStore((state) => state.introPhase);
+  const setLayerState = useRadarStore((state) => state.setLayerState);
+
+  // Update aircraft entity count for layer panel
+  useEffect(() => {
+    setLayerState('aircraft', { entityCount: aircraft.length });
+  }, [aircraft.length, setLayerState]);
   
   // Extract IDs
   const hoveredAircraftId = hoveredEntity?.type === 'aircraft' ? hoveredEntity.id : null;
@@ -75,7 +81,7 @@ export function AircraftLayerInstanced() {
   
   // Animation tracking
   const animationStartTime = useRef<number | null>(null);
-  
+
   // Determine if we should use simple LOD geometry
   const useSimpleGeometry = aircraft.length > AIRCRAFT.LOD_THRESHOLD;
   
@@ -203,9 +209,12 @@ export function AircraftLayerInstanced() {
     const elapsedTime = state.clock.elapsedTime;
     
     // Check if animation can start
-    const canAnimate = introPhase === 'aircraft' || introPhase === 'complete';
+    // If intro already complete (layer toggled back on), start at 50% stagger
+    const canAnimate = introPhase === 'aircraft' || introPhase === 'satellites' || introPhase === 'complete';
     if (canAnimate && animationStartTime.current === null) {
-      animationStartTime.current = elapsedTime;
+      animationStartTime.current = introPhase === 'complete'
+        ? elapsedTime - AIRCRAFT.FADE_IN_STAGGER_DURATION * 0.5
+        : elapsedTime;
     }
     const animTime = animationStartTime.current !== null 
       ? elapsedTime - animationStartTime.current 
@@ -244,11 +253,11 @@ export function AircraftLayerInstanced() {
       }
       
       // Calculate fade-in progress
-      const timeSinceFadeStart = acState.fadeInStartTime >= 0 
-        ? animTime - acState.fadeInStartTime - staggerDelay 
+      const timeSinceFadeStart = acState.fadeInStartTime >= 0
+        ? animTime - acState.fadeInStartTime - staggerDelay
         : -1;
-      const fadeProgress = timeSinceFadeStart < 0 
-        ? 0 
+      const fadeProgress = timeSinceFadeStart < 0
+        ? 0
         : Math.min(1, timeSinceFadeStart / AIRCRAFT.FADE_IN_INDIVIDUAL_DURATION);
       
       // Before fade starts, hide aircraft
@@ -307,8 +316,7 @@ export function AircraftLayerInstanced() {
       
       // Calculate final scale
       const baseScale = isSelected ? AIRCRAFT.SCALE_SELECTED : isHovered ? AIRCRAFT.SCALE_HOVERED : 1;
-      const pulse = isHighlighted ? 1 + Math.sin(elapsedTime * AIRCRAFT.PULSE_SPEED) * AIRCRAFT.PULSE_AMPLITUDE : 1;
-      const finalScale = baseScale * pulse * zoomScale * acState.smoothVisibility * fadeProgress;
+      const finalScale = baseScale * zoomScale * acState.smoothVisibility * fadeProgress;
       
       dummy.scale.setScalar(finalScale);
       

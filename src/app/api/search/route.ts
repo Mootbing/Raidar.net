@@ -6,7 +6,7 @@ interface SearchQuery {
 }
 
 interface ParsedSearch {
-  entityType: 'all' | 'aircraft' | 'airport' | 'missile' | 'radar' | 'sam_site' | 'ship';
+  entityType: 'all' | 'aircraft' | 'airport' | 'missile' | 'radar' | 'sam_site' | 'ship' | 'satellite' | 'dock' | 'news_event';
   filters: {
     field: string;
     operator: 'equals' | 'contains' | 'gt' | 'lt' | 'between';
@@ -18,13 +18,13 @@ interface ParsedSearch {
 export async function POST(request: NextRequest) {
   try {
     const { query, entityTypes }: SearchQuery = await request.json();
-    
+
     if (!query || query.trim().length === 0) {
       return NextResponse.json({ entityType: 'all', filters: [], freeText: [] });
     }
 
     const apiKey = process.env.OPENAI_API_KEY;
-    
+
     if (!apiKey) {
       // Fallback to simple text matching if no API key
       return NextResponse.json({
@@ -35,13 +35,16 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const systemPrompt = `You are a radar/flight search query parser. Parse natural language queries about various entities (aircraft, airports, missiles, etc.) into structured filters.
+    const systemPrompt = `You are a search query parser for a global observability platform. Parse natural language queries about entities into structured filters.
 
 ENTITY TYPE DETECTION:
-First, determine what type of entity the user is searching for:
-- "aircraft" - planes, flights, jets, helicopters
-- "airport" - airports, airfields, terminals, hubs
-- "missile" - missiles, rockets, projectiles
+Determine the entity type the user is searching for:
+- "aircraft" - planes, flights, jets, helicopters, air traffic
+- "airport" - airports, airfields, terminals, hubs, runways
+- "ship" - ships, vessels, boats, tankers, cargo ships, maritime traffic
+- "satellite" - satellites, orbital objects, space objects
+- "dock" - ports, docks, harbors, terminals, shipping terminals
+- "news_event" - news, events, incidents, reports, alerts
 - "all" - when no specific type is mentioned or multiple types
 
 AIRCRAFT FIELDS:
@@ -51,8 +54,6 @@ AIRCRAFT FIELDS:
 - altitude: Altitude in feet
 - speed: Ground speed in knots
 - heading: Track heading in degrees (0-360)
-- latitude/longitude: Position
-- onGround: Whether on ground
 - squawk: Transponder code
 
 AIRPORT FIELDS:
@@ -64,11 +65,32 @@ AIRPORT FIELDS:
 - elevation: Elevation in feet
 - airportType: large_airport, medium_airport, small_airport
 
-MISSILE FIELDS:
-- missileType: Type of missile
-- status: launched, cruising, terminal, intercepted, impact
-- altitude: Altitude in feet
+SHIP FIELDS:
+- name: Ship name
+- shipType: Type of vessel (cargo, tanker, passenger, etc.)
+- flag: Country flag
+- destination: Destination port
 - speed: Speed in knots
+- heading: Heading in degrees
+
+SATELLITE FIELDS:
+- name: Satellite name
+- noradId: NORAD catalog ID
+- orbitType: LEO, MEO, GEO, HEO, SSO
+- operator: Operating organization
+- purpose: Mission purpose (communications, weather, navigation, etc.)
+
+DOCK/PORT FIELDS:
+- name: Port name
+- portCode: Port code
+- country: Country
+- portType: container, bulk, naval, mixed, oil_terminal
+
+NEWS EVENT FIELDS:
+- headline: Event headline/title
+- source: News source
+- category: military, security, maritime, aviation, geopolitics, natural_disaster
+- severity: low, medium, high, critical
 
 ALTITUDE PATTERNS:
 - "20k ft" or "20K feet" = 20000 feet
@@ -82,13 +104,9 @@ HEADING/DIRECTION PATTERNS:
 - "heading east" or "eastbound" -> heading between [45, 135]
 - "heading west" or "westbound" -> heading between [225, 315]
 
-GEOGRAPHIC PATTERNS:
-- "in Europe" -> for airports: country contains european countries
-- "in the US" or "in America" -> country equals "United States" or "US"
-
 Return JSON with this structure:
 {
-  "entityType": "aircraft" | "airport" | "missile" | "all",
+  "entityType": "aircraft" | "airport" | "ship" | "satellite" | "dock" | "news_event" | "all",
   "filters": [
     { "field": "fieldName", "operator": "equals|contains|gt|lt|between", "value": "value or number or [min,max]" }
   ],
@@ -99,7 +117,14 @@ Examples:
 - "flights above 20k ft" -> { "entityType": "aircraft", "filters": [{ "field": "altitude", "operator": "gt", "value": 20000 }], "freeText": [] }
 - "airports in Germany" -> { "entityType": "airport", "filters": [{ "field": "country", "operator": "contains", "value": "Germany" }], "freeText": [] }
 - "JFK airport" -> { "entityType": "airport", "filters": [], "freeText": ["JFK"] }
-- "missiles cruising above 50k ft" -> { "entityType": "missile", "filters": [{ "field": "altitude", "operator": "gt", "value": 50000 }, { "field": "status", "operator": "equals", "value": "cruising" }], "freeText": [] }
+- "cargo ships" -> { "entityType": "ship", "filters": [{ "field": "shipType", "operator": "contains", "value": "cargo" }], "freeText": [] }
+- "ships flagged Panama" -> { "entityType": "ship", "filters": [{ "field": "flag", "operator": "contains", "value": "Panama" }], "freeText": [] }
+- "LEO satellites" -> { "entityType": "satellite", "filters": [{ "field": "orbitType", "operator": "equals", "value": "LEO" }], "freeText": [] }
+- "SpaceX satellites" -> { "entityType": "satellite", "filters": [], "freeText": ["SpaceX"] }
+- "container ports" -> { "entityType": "dock", "filters": [{ "field": "portType", "operator": "equals", "value": "container" }], "freeText": [] }
+- "ports in China" -> { "entityType": "dock", "filters": [{ "field": "country", "operator": "contains", "value": "China" }], "freeText": [] }
+- "critical news" -> { "entityType": "news_event", "filters": [{ "field": "severity", "operator": "equals", "value": "critical" }], "freeText": [] }
+- "military news" -> { "entityType": "news_event", "filters": [{ "field": "category", "operator": "equals", "value": "military" }], "freeText": [] }
 - "United flights heading west" -> { "entityType": "aircraft", "filters": [{ "field": "callsign", "operator": "contains", "value": "UAL" }, { "field": "heading", "operator": "between", "value": [225, 315] }], "freeText": [] }
 - "large airports" -> { "entityType": "airport", "filters": [{ "field": "airportType", "operator": "equals", "value": "large_airport" }], "freeText": [] }`;
 
@@ -126,7 +151,7 @@ Examples:
 
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content || '{}';
-    
+
     // Extract JSON from the response
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
@@ -138,12 +163,12 @@ Examples:
     }
 
     const parsed: ParsedSearch = JSON.parse(jsonMatch[0]);
-    
+
     // If entityTypes filter is specified, override if needed
     if (entityTypes && entityTypes.length > 0 && !entityTypes.includes(parsed.entityType) && parsed.entityType !== 'all') {
       parsed.entityType = 'all';
     }
-    
+
     return NextResponse.json(parsed);
 
   } catch (error) {

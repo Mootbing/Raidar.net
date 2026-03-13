@@ -62,6 +62,12 @@ function opacityEase(t: number, targetOpacity: number): number {
   }
 }
 
+// Military airport detection by name keywords
+const MILITARY_KEYWORDS = ['air force', 'afb', 'naval air', 'military', 'army airfield', 'raf ', 'air base', 'jsdf', 'fuerza aérea'];
+function isAirportMilitary(name: string): boolean {
+  const lower = name.toLowerCase();
+  return MILITARY_KEYWORDS.some(kw => lower.includes(kw));
+}
 // Instanced mesh for large airports
 function LargeAirportsInstanced({ airports }: { airports: Airport[] }) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
@@ -83,6 +89,8 @@ function LargeAirportsInstanced({ airports }: { airports: Airport[] }) {
     return airports.map(airport => latLonToVector3(airport.lat, airport.lon, 0, GLOBE.AIRPORT_SURFACE_OFFSET));
   }, [airports]);
   
+  const militaryFlags = useMemo(() => airports.map(a => isAirportMilitary(a.name)), [airports]);
+
   // Pre-computed stagger delays - sorted by distance from top-left for nth-child sprawl effect
   const staggerDelays = useMemo(() => {
     // Calculate distance from "top-left" for each airport
@@ -125,20 +133,23 @@ function LargeAirportsInstanced({ airports }: { airports: Airport[] }) {
     const { dummy, vec3_a } = allocs.current;
     
     // Start animation when airports phase begins
-    if (introPhase === 'airports' || introPhase === 'aircraft' || introPhase === 'complete') {
+    // If intro already complete (layer toggled back on), skip sweep
+    if (introPhase === 'airports' || introPhase === 'docks' || introPhase === 'maritime' || introPhase === 'aircraft' || introPhase === 'satellites' || introPhase === 'complete') {
       if (!animationStarted.current) {
         animationStarted.current = true;
-        animationTime.current = 0;
+        animationTime.current = introPhase === 'complete'
+          ? AIRPORTS.FADE_IN_STAGGER_DURATION * 0.5
+          : 0;
       }
     }
-    
+
     if (animationStarted.current) {
       animationTime.current += delta;
     }
-    
+
     // Pre-compute up vector once (reused for all instances)
     vec3_a.set(0, 0, 1);
-    
+
     let maxProgress = 0;
     
     if (instanceOpacities.current.length !== positions.length) {
@@ -173,9 +184,9 @@ function LargeAirportsInstanced({ airports }: { airports: Airport[] }) {
       dummy.updateMatrix();
       meshRef.current!.setMatrixAt(i, dummy.matrix);
     }
-    
+
     meshRef.current.instanceMatrix.needsUpdate = true;
-    
+
     // Opacity animation: low → 100% → target
     const material = meshRef.current.material as THREE.MeshBasicMaterial;
     material.opacity = opacityEase(maxProgress, AIRPORTS.LARGE_AIRPORT_MAX_OPACITY);
@@ -189,48 +200,48 @@ function LargeAirportsInstanced({ airports }: { airports: Airport[] }) {
     const hoveredIdx = hoveredAirport ? indexToIcao.indexOf(hoveredAirport) : -1;
     
     for (let i = 0; i < airports.length; i++) {
-      color.set(i === hoveredIdx ? COLORS.AIRPORT_HOVERED : COLORS.AIRPORT_DEFAULT);
+      if (i === hoveredIdx) {
+        color.set(COLORS.AIRPORT_HOVERED);
+      } else if (militaryFlags[i]) {
+        color.set(COLORS.MILITARY);
+      } else {
+        color.set(COLORS.AIRPORT_DEFAULT);
+      }
       meshRef.current.setColorAt(i, color);
     }
     if (meshRef.current.instanceColor) {
       meshRef.current.instanceColor.needsUpdate = true;
     }
-  }, [hoveredAirport, airports.length, indexToIcao]);
-  
+  }, [hoveredAirport, airports.length, indexToIcao, militaryFlags]);
+
   const handlePointerOver = (e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation();
     if (e.instanceId !== undefined && indexToIcao[e.instanceId]) {
       hoverEntity({ type: 'airport', id: indexToIcao[e.instanceId] });
     }
   };
-  
+
   const handlePointerOut = () => hoverEntity(null);
-  
+
   const handleClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
     if (e.instanceId !== undefined && indexToIcao[e.instanceId]) {
       selectEntity({ type: 'airport', id: indexToIcao[e.instanceId] });
     }
   };
-  
+
   if (airports.length === 0) return null;
-  
+
   return (
-    <instancedMesh 
-      ref={meshRef} 
+    <instancedMesh
+      ref={meshRef}
       args={[undefined, undefined, airports.length]}
       onPointerOver={handlePointerOver}
       onPointerOut={handlePointerOut}
       onClick={handleClick}
     >
       <planeGeometry args={[AIRPORTS.LARGE_AIRPORT_SIZE, AIRPORTS.LARGE_AIRPORT_SIZE]} />
-      <meshBasicMaterial 
-        color="#ffffff" 
-        transparent 
-        opacity={0}
-        side={THREE.DoubleSide}
-        depthWrite={false}
-      />
+      <meshBasicMaterial color={COLORS.HITBOX} transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
     </instancedMesh>
   );
 }
@@ -238,13 +249,14 @@ function LargeAirportsInstanced({ airports }: { airports: Airport[] }) {
 // Instanced mesh for small/medium airports
 function SmallAirportsInstanced({ airports }: { airports: Airport[] }) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
+  const borderMeshRef = useRef<THREE.InstancedMesh>(null);
   const { camera } = useThree();
   const hoverEntity = useRadarStore((state) => state.hoverEntity);
   const selectEntity = useRadarStore((state) => state.selectEntity);
   const hoveredEntity = useRadarStore((state) => state.gameState.hoveredEntity);
   const hoveredAirport = hoveredEntity?.type === 'airport' ? hoveredEntity.id : null;
   const introPhase = useRadarStore((state) => state.introPhase);
-  
+
   // Pre-allocated objects - CRITICAL
   const allocs = useRef(createRenderLoopAllocations());
   const animationTime = useRef(0);
@@ -255,6 +267,8 @@ function SmallAirportsInstanced({ airports }: { airports: Airport[] }) {
     return airports.map(airport => latLonToVector3(airport.lat, airport.lon, 0, GLOBE.AIRPORT_SURFACE_OFFSET));
   }, [airports]);
   
+  const militaryFlags = useMemo(() => airports.map(a => isAirportMilitary(a.name)), [airports]);
+
   // Pre-computed stagger delays - sorted by distance from top-left for nth-child sprawl effect
   const staggerDelays = useMemo(() => {
     const distances = airports.map((airport, idx) => {
@@ -263,24 +277,24 @@ function SmallAirportsInstanced({ airports }: { airports: Airport[] }) {
       const distance = Math.sqrt(normalizedLat * normalizedLat + normalizedLon * normalizedLon);
       return { idx, distance };
     });
-    
+
     distances.sort((a, b) => a.distance - b.distance);
-    
+
     const delays = new Array(airports.length);
     const delayPerItem = AIRPORTS.FADE_IN_STAGGER_DURATION / Math.max(1, airports.length);
     distances.forEach((item, sortedIdx) => {
       delays[item.idx] = sortedIdx * delayPerItem;
     });
-    
+
     return delays;
   }, [airports]);
-  
+
   const indexToIcao = useMemo(() => airports.map(a => a.icao), [airports]);
-  
+
   useEffect(() => {
     instanceOpacities.current = new Array(airports.length).fill(0);
   }, [airports.length]);
-  
+
   // Update colors based on hover state
   useEffect(() => {
     if (!meshRef.current) return;
@@ -291,6 +305,8 @@ function SmallAirportsInstanced({ airports }: { airports: Airport[] }) {
     for (let i = 0; i < airports.length; i++) {
       if (i === hoveredIdx) {
         color.set(COLORS.AIRPORT_HOVERED);
+      } else if (militaryFlags[i]) {
+        color.set(COLORS.MILITARY);
       } else {
         color.set(COLORS.AIRPORT_DEFAULT);
       }
@@ -299,26 +315,28 @@ function SmallAirportsInstanced({ airports }: { airports: Airport[] }) {
     if (meshRef.current.instanceColor) {
       meshRef.current.instanceColor.needsUpdate = true;
     }
-  }, [hoveredAirport, airports.length, indexToIcao]);
-  
+  }, [hoveredAirport, airports.length, indexToIcao, militaryFlags]);
+
   useFrame((_, delta) => {
     if (!meshRef.current || positions.length === 0) return;
     
     const { dummy, vec3_a } = allocs.current;
     
-    if (introPhase === 'airports' || introPhase === 'aircraft' || introPhase === 'complete') {
+    // If intro already complete (layer toggled back on), skip sweep
+    if (introPhase === 'airports' || introPhase === 'docks' || introPhase === 'maritime' || introPhase === 'aircraft' || introPhase === 'satellites' || introPhase === 'complete') {
       if (!animationStarted.current) {
         animationStarted.current = true;
-        animationTime.current = 0;
+        animationTime.current = introPhase === 'complete'
+          ? AIRPORTS.FADE_IN_STAGGER_DURATION * 0.5
+          : 0;
       }
     }
-    
+
     if (animationStarted.current) {
       animationTime.current += delta;
     }
-    
-    const cameraDistance = camera.position.length();
-    const baseOpacity = Math.max(0, Math.min(1, (AIRPORTS.SMALL_AIRPORT_FADE_DISTANCE - cameraDistance) * AIRPORTS.SMALL_AIRPORT_FADE_SPEED));
+
+    const baseOpacity = 1;
     
     vec3_a.set(0, 0, 1);
     let maxProgress = 0;
@@ -364,9 +382,9 @@ function SmallAirportsInstanced({ airports }: { airports: Airport[] }) {
       dummy.updateMatrix();
       meshRef.current!.setMatrixAt(i, dummy.matrix);
     }
-    
+
     meshRef.current.instanceMatrix.needsUpdate = true;
-    
+
     // Opacity animation: low → 100% → target (factored by baseOpacity for distance fade)
     const material = meshRef.current.material as THREE.MeshBasicMaterial;
     const targetOpacity = baseOpacity * AIRPORTS.SMALL_AIRPORT_MAX_OPACITY;
@@ -393,21 +411,15 @@ function SmallAirportsInstanced({ airports }: { airports: Airport[] }) {
   if (airports.length === 0) return null;
   
   return (
-    <instancedMesh 
-      ref={meshRef} 
+    <instancedMesh
+      ref={meshRef}
       args={[undefined, undefined, airports.length]}
       onPointerOver={handlePointerOver}
       onPointerOut={handlePointerOut}
       onClick={handleClick}
     >
       <planeGeometry args={[AIRPORTS.SMALL_AIRPORT_SIZE, AIRPORTS.SMALL_AIRPORT_SIZE]} />
-      <meshBasicMaterial 
-        color="#ffffff" 
-        transparent 
-        opacity={0.5}
-        side={THREE.DoubleSide}
-        depthWrite={false}
-      />
+      <meshBasicMaterial color={COLORS.HITBOX} transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
     </instancedMesh>
   );
 }
@@ -416,12 +428,17 @@ export function AirportsLayer() {
   const airports = useRadarStore((state) => state.airports);
   const fetchAirports = useRadarStore((state) => state.fetchAirports);
   const locationReady = useRadarStore((state) => state.locationReady);
-  
+  const setLayerState = useRadarStore((state) => state.setLayerState);
+
   useEffect(() => {
     if (locationReady) {
       fetchAirports();
     }
   }, [locationReady, fetchAirports]);
+
+  useEffect(() => {
+    setLayerState('airports', { entityCount: airports.length });
+  }, [airports.length, setLayerState]);
   
   const { largeAirports, smallAirports } = useMemo(() => {
     const large: Airport[] = [];

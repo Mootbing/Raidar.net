@@ -19,7 +19,6 @@ export function Dashboard() {
   
   // Delay animation start until after loading screen fades
   const [animateIn, setAnimateIn] = useState(false);
-  const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [layerPanelOpen, setLayerPanelOpen] = useState(false);
   
   useEffect(() => {
@@ -39,11 +38,10 @@ export function Dashboard() {
   const handleGlobalAction = useCallback((action: InputAction) => {
     switch (action) {
       case 'deselect':
-        if (layerPanelOpen) {
-          setLayerPanelOpen(false);
-        } else {
-          handleClosePanel();
-        }
+        handleClosePanel();
+        break;
+      case 'toggle_layers':
+        setLayerPanelOpen(prev => !prev);
         break;
       case 'select_hovered':
         if (gameState.hoveredEntity) {
@@ -51,7 +49,7 @@ export function Dashboard() {
         }
         break;
     }
-  }, [handleClosePanel, gameState.hoveredEntity, selectEntity, layerPanelOpen]);
+  }, [handleClosePanel, gameState.hoveredEntity, selectEntity]);
   
   useGlobalInput(handleGlobalAction);
 
@@ -66,7 +64,7 @@ export function Dashboard() {
             className={`${BG.GLASS_BLUR} ${BORDER.PANEL} px-3 py-1.5 ${TEXT.BASE} ${TEXT.MUTED} hover:text-white/80 transition-colors tracking-wider ${animateIn ? 'bottom-bar-item animate-in' : 'bottom-bar-item'}`}
             style={{ '--item-index': 0 } as React.CSSProperties}
           >
-            LAYERS
+            <span className="opacity-50">[/]</span> LAYERS
           </button>
         )}
       </div>
@@ -78,16 +76,16 @@ export function Dashboard() {
       
       {/* Bottom Bar */}
       <div className="absolute bottom-0 left-0 right-0 p-3 pointer-events-auto">
-        <div className="flex gap-3 items-end">
-          {/* Left: Stacked Mode Bars (Filter + AI Tools) */}
-          <StackedModeBars isSearchFocused={isSearchFocused} animateIn={animateIn} />
+        <div className="flex gap-3 items-stretch">
+          {/* Left: AI Tools Bar */}
+          <StackedModeBars animateIn={animateIn} />
           
           {/* Center: Search Bar - spans all available space */}
-          <div 
-            className={`flex-1 min-w-0 ${animateIn ? 'bottom-bar-item animate-in' : 'bottom-bar-item'}`}
+          <div
+            className={`flex-1 min-w-0 flex flex-col ${animateIn ? 'bottom-bar-item animate-in' : 'bottom-bar-item'}`}
             style={{ '--item-index': 1 } as React.CSSProperties}
           >
-            <SearchBar onFocusChange={setIsSearchFocused} />
+            <SearchBar onFocusChange={() => {}} />
           </div>
       
           {/* Right: Hints & Branding */}
@@ -95,7 +93,7 @@ export function Dashboard() {
             className={`shrink-0 flex flex-col justify-center text-right ${BG.GLASS_BLUR} ${BORDER.PANEL} px-3 py-2 gap-0.5 ${animateIn ? 'bottom-bar-item animate-in' : 'bottom-bar-item'}`}
             style={{ '--item-index': 2 } as React.CSSProperties}
           >
-            <div className={`${TEXT.XS} ${TEXT.MUTED}`}>WASD: move | ⇧+W/S: zoom | TAB: modes</div>
+            <div className={`${TEXT.XS} ${TEXT.MUTED}`}>WASD: move | ⇧+W/S: zoom | TAB: tools | /: layers</div>
             <div className={`${TEXT.XS} ${TEXT.MUTED} group cursor-default flex items-center justify-end gap-1.5`}>
               <img src="/@bullhorn.png" alt="" className="w-3 h-3 opacity-50" />
               <span className="transition-opacity duration-200 group-hover:opacity-0">RAIDAR OBSERVABILITY NETWORK</span>

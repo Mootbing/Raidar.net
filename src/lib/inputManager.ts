@@ -10,7 +10,8 @@ export type InputAction =
   | 'snap_toggle' | 'snap_up' | 'snap_down' | 'snap_left' | 'snap_right'
   | 'filter_cycle' | 'filter_menu_open' | 'filter_menu_close'
   | 'search_focus' | 'search_blur'
-  | 'select_hovered' | 'deselect';
+  | 'select_hovered' | 'deselect'
+  | 'toggle_layers';
 
 export interface InputState {
   // Movement
@@ -168,6 +169,13 @@ class InputManager {
       return;
     }
     
+    // === Slash key - Toggle layers ===
+    if (e.key === '/') {
+      e.preventDefault();
+      if (!e.repeat) this.dispatch('toggle_layers', 'global');
+      return;
+    }
+
     // === Escape key - Deselect ===
     if (e.key === 'Escape') {
       this.dispatch('deselect', 'global');

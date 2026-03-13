@@ -111,7 +111,8 @@ function parseStateVectors(states: any[]): ParsedAircraft[] { // eslint-disable-
   return aircraft;
 }
 
-export async function fetchAircraft(): Promise<void> {
+/** Returns true on success, false on failure (for backoff logic). */
+export async function fetchAircraft(): Promise<boolean> {
   const db = getDb();
   const startTime = Date.now();
 
@@ -127,7 +128,7 @@ export async function fetchAircraft(): Promise<void> {
       const msg = `OpenSky API error: ${res.status}`;
       console.error(`[Fetcher:Aircraft] ${msg}`);
       await updateFetcherState('aircraft', msg);
-      return;
+      return false;
     }
 
     const data = await res.json();
@@ -136,7 +137,7 @@ export async function fetchAircraft(): Promise<void> {
     if (states.length === 0) {
       console.warn('[Fetcher:Aircraft] No states returned');
       await updateFetcherState('aircraft', 'No states returned');
-      return;
+      return false;
     }
 
     const aircraft = parseStateVectors(states);
@@ -189,9 +190,9 @@ export async function fetchAircraft(): Promise<void> {
       });
     }
 
-    // Clean stale positions (> 5 minutes old)
+    // Clean stale positions (> 24 hours old — keep data cached when fetcher restarts)
     await db.delete(aircraftPositions).where(
-      sql`${aircraftPositions.updatedAt} < NOW() - INTERVAL '5 minutes'`
+      sql`${aircraftPositions.updatedAt} < NOW() - INTERVAL '24 hours'`
     );
 
     // Check for new icao24s that need metadata
@@ -235,10 +236,12 @@ export async function fetchAircraft(): Promise<void> {
     console.log(`[Fetcher:Aircraft] Upserted ${aircraft.length} positions in ${elapsed}s`);
 
     await updateFetcherState('aircraft', null);
+    return true;
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown error';
     console.error(`[Fetcher:Aircraft] Error: ${msg}`);
     await updateFetcherState('aircraft', msg);
+    return false;
   }
 }
 

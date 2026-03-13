@@ -1,61 +1,174 @@
-import { fetchSatellites } from './fetchSatellites';
-import { fetchAircraft } from './fetchAircraft';
+import * as fs from 'fs';
+import * as path from 'path';
 
-// ============================================================================
-// FETCHER ENTRY POINT
-// Runs aircraft + satellite fetch loops via setInterval.
-// ============================================================================
-
-const AIRCRAFT_INTERVAL = 10_000;       // 10 seconds
-const SATELLITE_INTERVAL = 4 * 60 * 60 * 1000; // 4 hours
-
-let aircraftTimer: ReturnType<typeof setInterval> | null = null;
-let satelliteTimer: ReturnType<typeof setInterval> | null = null;
-let isRunning = true;
-
-async function runAircraftLoop() {
-  if (!isRunning) return;
-  try {
-    await fetchAircraft();
-  } catch (error) {
-    console.error('[Fetcher] Aircraft loop error:', error);
+// Load .env.local manually (tsx doesn't auto-load it like Next.js does)
+const envPath = path.resolve(process.cwd(), '.env.local');
+if (fs.existsSync(envPath)) {
+  const envContent = fs.readFileSync(envPath, 'utf-8');
+  for (const line of envContent.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx === -1) continue;
+    const key = trimmed.slice(0, eqIdx).trim();
+    const value = trimmed.slice(eqIdx + 1).trim();
+    if (!process.env[key]) {
+      process.env[key] = value;
+    }
   }
 }
 
-async function runSatelliteLoop() {
-  if (!isRunning) return;
-  try {
-    await fetchSatellites();
-  } catch (error) {
-    console.error('[Fetcher] Satellite loop error:', error);
+import { fetchSatellites } from './fetchSatellites';
+import { fetchAircraft } from './fetchAircraft';
+import { fetchMaritime } from './fetchMaritime';
+import { fetchNews } from './fetchNews';
+
+// ============================================================================
+// FETCHER ENTRY POINT
+// Runs aircraft + satellite + maritime fetch loops with exponential backoff.
+// ============================================================================
+
+const AIRCRAFT_BASE_INTERVAL = 10_000;  // 10 seconds on success
+const AIRCRAFT_MAX_INTERVAL = 5 * 60_000; // 5 minutes max backoff
+const SATELLITE_INTERVAL = 4 * 60 * 60 * 1000; // 4 hours
+const MARITIME_BASE_INTERVAL = 60_000;  // 60 seconds on success
+const MARITIME_MAX_INTERVAL = 5 * 60_000; // 5 minutes max backoff
+const NEWS_BASE_INTERVAL = 5 * 60_000;   // 5 minutes on success
+const NEWS_MAX_INTERVAL = 15 * 60_000;   // 15 minutes max backoff
+
+let isRunning = true;
+let aircraftConsecutiveErrors = 0;
+let maritimeConsecutiveErrors = 0;
+let newsConsecutiveErrors = 0;
+
+function getAircraftInterval(): number {
+  if (aircraftConsecutiveErrors === 0) return AIRCRAFT_BASE_INTERVAL;
+  const backoff = AIRCRAFT_BASE_INTERVAL * Math.pow(2, Math.min(aircraftConsecutiveErrors, 5));
+  return Math.min(backoff, AIRCRAFT_MAX_INTERVAL);
+}
+
+function getMaritimeInterval(): number {
+  if (maritimeConsecutiveErrors === 0) return MARITIME_BASE_INTERVAL;
+  const backoff = MARITIME_BASE_INTERVAL * Math.pow(2, Math.min(maritimeConsecutiveErrors, 5));
+  return Math.min(backoff, MARITIME_MAX_INTERVAL);
+}
+
+function getNewsInterval(): number {
+  if (newsConsecutiveErrors === 0) return NEWS_BASE_INTERVAL;
+  const backoff = NEWS_BASE_INTERVAL * Math.pow(2, Math.min(newsConsecutiveErrors, 3));
+  return Math.min(backoff, NEWS_MAX_INTERVAL);
+}
+
+async function aircraftLoop() {
+  while (isRunning) {
+    try {
+      const success = await fetchAircraft();
+      if (success) {
+        aircraftConsecutiveErrors = 0;
+      } else {
+        aircraftConsecutiveErrors++;
+      }
+    } catch (error) {
+      aircraftConsecutiveErrors++;
+      console.error('[Fetcher] Aircraft loop error:', error);
+    }
+
+    const interval = getAircraftInterval();
+    if (aircraftConsecutiveErrors > 0) {
+      console.log(`[Fetcher] Aircraft backoff: ${(interval / 1000).toFixed(0)}s (${aircraftConsecutiveErrors} consecutive errors)`);
+    }
+    await sleep(interval);
   }
+}
+
+async function maritimeLoop() {
+  while (isRunning) {
+    try {
+      const success = await fetchMaritime();
+      if (success) {
+        maritimeConsecutiveErrors = 0;
+      } else {
+        maritimeConsecutiveErrors++;
+      }
+    } catch (error) {
+      maritimeConsecutiveErrors++;
+      console.error('[Fetcher] Maritime loop error:', error);
+    }
+
+    const interval = getMaritimeInterval();
+    if (maritimeConsecutiveErrors > 0) {
+      console.log(`[Fetcher] Maritime backoff: ${(interval / 1000).toFixed(0)}s (${maritimeConsecutiveErrors} consecutive errors)`);
+    }
+    await sleep(interval);
+  }
+}
+
+async function satelliteLoop() {
+  while (isRunning) {
+    try {
+      await fetchSatellites();
+    } catch (error) {
+      console.error('[Fetcher] Satellite loop error:', error);
+    }
+    await sleep(SATELLITE_INTERVAL);
+  }
+}
+
+async function newsLoop() {
+  while (isRunning) {
+    try {
+      const success = await fetchNews();
+      if (success) {
+        newsConsecutiveErrors = 0;
+      } else {
+        newsConsecutiveErrors++;
+      }
+    } catch (error) {
+      newsConsecutiveErrors++;
+      console.error('[Fetcher] News loop error:', error);
+    }
+
+    const interval = getNewsInterval();
+    if (newsConsecutiveErrors > 0) {
+      console.log(`[Fetcher] News backoff: ${(interval / 1000).toFixed(0)}s (${newsConsecutiveErrors} consecutive errors)`);
+    }
+    await sleep(interval);
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => {
+    const timer = setTimeout(resolve, ms);
+    // Allow shutdown to interrupt sleep
+    const check = setInterval(() => {
+      if (!isRunning) {
+        clearTimeout(timer);
+        clearInterval(check);
+        resolve();
+      }
+    }, 1000);
+  });
 }
 
 async function main() {
   console.log('[Fetcher] Starting data fetcher...');
-  console.log(`[Fetcher] Aircraft interval: ${AIRCRAFT_INTERVAL / 1000}s`);
+  console.log(`[Fetcher] Aircraft base interval: ${AIRCRAFT_BASE_INTERVAL / 1000}s (with exponential backoff on error)`);
   console.log(`[Fetcher] Satellite interval: ${SATELLITE_INTERVAL / 3600000}h`);
+  console.log(`[Fetcher] Maritime base interval: ${MARITIME_BASE_INTERVAL / 1000}s (with exponential backoff on error)`);
+  console.log(`[Fetcher] News base interval: ${NEWS_BASE_INTERVAL / 1000}s (with exponential backoff on error)`);
 
-  // Run initial fetches
-  console.log('[Fetcher] Running initial satellite fetch...');
-  await runSatelliteLoop();
-
-  console.log('[Fetcher] Running initial aircraft fetch...');
-  await runAircraftLoop();
-
-  // Start loops
-  aircraftTimer = setInterval(runAircraftLoop, AIRCRAFT_INTERVAL);
-  satelliteTimer = setInterval(runSatelliteLoop, SATELLITE_INTERVAL);
-
-  console.log('[Fetcher] Fetch loops started. Press Ctrl+C to stop.');
+  // Run all loops concurrently
+  await Promise.all([
+    satelliteLoop(),
+    aircraftLoop(),
+    maritimeLoop(),
+    newsLoop(),
+  ]);
 }
 
 function shutdown() {
   console.log('\n[Fetcher] Shutting down...');
   isRunning = false;
-  if (aircraftTimer) clearInterval(aircraftTimer);
-  if (satelliteTimer) clearInterval(satelliteTimer);
-  process.exit(0);
 }
 
 process.on('SIGINT', shutdown);
