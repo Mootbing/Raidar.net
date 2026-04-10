@@ -17,7 +17,7 @@
     "@react-three/postprocessing": "^3.0.4",
     "@types/three": "^0.182.0",
     "drizzle-orm": "^0.45.1",
-    "next": "16.1.0",
+    "next": "16.2.3",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "satellite.js": "^6.0.2",
